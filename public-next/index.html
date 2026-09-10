@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#101218" />
+    <title>SillyTavern</title>
+    <link rel="icon" href="/favicon.ico" />
+    <script>
+        // Apply the persisted appearance before first paint to avoid a flash of
+        // the wrong theme. Mirrors the shape written by src/store/ui.ts.
+        (function () {
+            try {
+                var raw = localStorage.getItem('st-next:ui');
+                if (!raw) return;
+                var ui = JSON.parse(raw).state || {};
+                var root = document.documentElement;
+                if (ui.theme === 'dark' || ui.theme === 'light') root.dataset.theme = ui.theme;
+                if (ui.density) root.dataset.density = ui.density;
+                if (ui.proseFont) root.dataset.proseFont = ui.proseFont;
+                if (typeof ui.accentHue === 'number') root.style.setProperty('--accent-hue', String(ui.accentHue));
+            } catch (e) { /* first run, or storage blocked */ }
+        })();
+    </script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

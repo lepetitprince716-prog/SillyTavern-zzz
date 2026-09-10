@@ -58,3 +58,6 @@ public/scripts/extensions/third-party
 yarn.lock
 *.code-workspace
 test-results/
+
+# Modern frontend (public-next) build output
+public-next/dist/

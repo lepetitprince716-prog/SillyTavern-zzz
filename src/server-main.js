@@ -71,6 +71,7 @@ import { init as statsInit, onExit as statsOnExit } from './endpoints/stats.js';
 import { checkForNewContent } from './endpoints/content-manager.js';
 import { init as settingsInit } from './endpoints/settings.js';
 import { redirectDeprecatedEndpoints, ServerStartup, setupPrivateEndpoints } from './server-startup.js';
+import { setupNextFrontend } from './next-frontend.js';
 import { diskCache } from './endpoints/characters.js';
 import { migrateFlatSecrets } from './endpoints/secrets.js';
 import { migrateGroupChatsMetadataFormat } from './endpoints/groups.js';
@@ -234,6 +235,9 @@ app.get('/callback/:source?', (request, response) => {
 
 // Host login page
 app.get('/login', loginPageMiddleware);
+
+// Host the modern frontend preview at /next, alongside the classic UI at /
+setupNextFrontend(app);
 
 // Host frontend assets
 const webpackMiddleware = getWebpackServeMiddleware();
