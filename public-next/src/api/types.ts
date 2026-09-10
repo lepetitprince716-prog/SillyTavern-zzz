@@ -144,6 +144,14 @@ export const SOURCE_LABELS: Record<ChatCompletionSource, string> = {
     custom: 'Custom (OpenAI-compatible)',
 };
 
+/**
+ * Reasoning budget, in the vocabulary the Responses API accepts.
+ * `default` means "send nothing and let the model decide".
+ */
+export const REASONING_EFFORTS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
 /** Sampling parameters the UI lets the user drive. */
 export interface GenerationParams {
     model: string;
@@ -165,6 +173,20 @@ export interface GenerateRequest extends GenerationParams {
     proxy_password?: string;
     char_name?: string;
     user_name?: string;
+    /**
+     * Route through the OpenAI Responses API (`/v1/responses`) instead of Chat
+     * Completions. Supported for the `openai` and `custom` sources.
+     */
+    use_responses_api?: boolean;
+    /** Reasoning budget. Omitted when the user has not chosen one. */
+    reasoning_effort?: Exclude<ReasoningEffort, 'default'>;
+    /** Ask for reasoning summaries alongside the answer. */
+    include_reasoning?: boolean;
+    /**
+     * Let the provider retain the response. The Responses API defaults this to
+     * true; the backend sends false unless it is explicitly set.
+     */
+    store?: boolean;
 }
 
 /** Response of `POST /api/backends/chat-completions/status`. */

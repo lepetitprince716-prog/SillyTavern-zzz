@@ -1,5 +1,11 @@
 import { apiPost, apiStream } from './client';
-import type { ChatCompletionSource, GenerateRequest, PromptMessage, StatusResponse } from './types';
+import type {
+    ChatCompletionSource,
+    GenerateRequest,
+    PromptMessage,
+    ReasoningEffort,
+    StatusResponse,
+} from './types';
 
 export interface GenerateOptions {
     source: ChatCompletionSource;
@@ -15,8 +21,18 @@ export interface GenerateOptions {
     customUrl?: string;
     characterName?: string;
     userName?: string;
+    /** Use the OpenAI Responses API rather than Chat Completions. */
+    useResponsesApi?: boolean;
+    reasoningEffort?: ReasoningEffort;
+    includeReasoning?: boolean;
     signal?: AbortSignal;
 }
+
+/**
+ * Sources that can speak the Responses API.
+ * `custom` is included because an OpenAI-compatible server may implement it.
+ */
+export const RESPONSES_API_SOURCES: ReadonlySet<ChatCompletionSource> = new Set(['openai', 'custom']);
 
 function buildBody(options: GenerateOptions): GenerateRequest {
     const body: GenerateRequest = {
@@ -38,6 +54,15 @@ function buildBody(options: GenerateOptions): GenerateRequest {
     }
     if (options.userName) {
         body.user_name = options.userName;
+    }
+    if (options.useResponsesApi && RESPONSES_API_SOURCES.has(options.source)) {
+        body.use_responses_api = true;
+    }
+    if (options.reasoningEffort && options.reasoningEffort !== 'default') {
+        body.reasoning_effort = options.reasoningEffort;
+    }
+    if (options.includeReasoning) {
+        body.include_reasoning = true;
     }
     return body;
 }
@@ -64,10 +89,52 @@ function read(value: unknown, key: string): unknown {
 }
 
 /**
+ * Walks a Responses API result for the assistant's visible text.
+ *
+ * The payload is a list of output items; the answer lives in `output_text`
+ * parts of the `message` item. Reasoning items are skipped.
+ */
+function readResponsesOutput(payload: unknown): string {
+    const output = read(payload, 'output');
+    if (!Array.isArray(output)) {
+        return '';
+    }
+    let text = '';
+    for (const item of output) {
+        if (read(item, 'type') !== 'message') {
+            continue;
+        }
+        const parts = read(item, 'content');
+        if (!Array.isArray(parts)) {
+            continue;
+        }
+        for (const part of parts) {
+            if (read(part, 'type') === 'output_text') {
+                text += String(read(part, 'text') ?? '');
+            }
+        }
+    }
+    return text;
+}
+
+/**
  * Pulls the assistant text out of a non-streamed completion.
  * Handles the OpenAI, Anthropic and Google response envelopes.
  */
 export function extractCompletion(payload: unknown): string {
+    // Responses API: { object: 'response', output: [...] }. Checked first
+    // because its `output_text` convenience field can also be absent.
+    if (read(payload, 'object') === 'response' || Array.isArray(read(payload, 'output'))) {
+        const fromOutput = readResponsesOutput(payload);
+        if (fromOutput) {
+            return fromOutput;
+        }
+        const convenience = read(payload, 'output_text');
+        if (typeof convenience === 'string') {
+            return convenience;
+        }
+    }
+
     const choices = read(payload, 'choices');
     if (Array.isArray(choices) && choices.length > 0) {
         const first = choices[0];

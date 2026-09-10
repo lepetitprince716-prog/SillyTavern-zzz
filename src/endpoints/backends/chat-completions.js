@@ -40,6 +40,7 @@ import {
     convertMistralMessages,
     convertAI21Messages,
     convertXAIMessages,
+    convertResponsesApiMessages,
     cachingAtDepthForOpenRouterClaude,
     cachingAtDepthForClaude,
     getPromptNames,
@@ -1641,6 +1642,219 @@ async function sendMinimaxRequest(request, response) {
  * @param {express.Request} request Express request object (contains request.body with all generate_data)
  * @param {express.Response} response Express response object
  */
+/**
+ * Sampling and shaping parameters that the Responses API accepts for some
+ * models and rejects for others (reasoning models turn `temperature` down
+ * flat). Each one can be dropped and the request retried, so a model we have
+ * never heard of still works instead of returning a bare 400.
+ * @type {string[]}
+ */
+const RESPONSES_OPTIONAL_PARAMS = ['temperature', 'top_p', 'reasoning', 'text', 'max_output_tokens'];
+
+/**
+ * Decides which optional parameter an error is complaining about.
+ * @param {any} errorData Parsed error body from the API
+ * @returns {string|null} The parameter to drop, or null if the error is something else
+ */
+function getUnsupportedResponsesParam(errorData) {
+    const error = errorData?.error;
+    if (!error) {
+        return null;
+    }
+
+    // `param` may be a path such as "reasoning.effort"; the top segment is what
+    // we would remove from the body.
+    const param = typeof error.param === 'string' ? error.param.split('.')[0] : '';
+    if (param && RESPONSES_OPTIONAL_PARAMS.includes(param)) {
+        return param;
+    }
+
+    const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+    if (!/unsupported|not supported|unrecognized|unknown parameter/.test(message)) {
+        return null;
+    }
+
+    return RESPONSES_OPTIONAL_PARAMS.find(name => message.includes(name)) ?? null;
+}
+
+/**
+ * Sends a request to the OpenAI Responses API.
+ *
+ * This is a separate endpoint from Chat Completions with its own request shape
+ * (`input` instead of `messages`, `max_output_tokens` instead of `max_tokens`)
+ * and its own SSE event vocabulary, which the client parses. Opt in per request
+ * with `use_responses_api`, so existing callers keep using Chat Completions.
+ *
+ * @param {import('express').Request} request Express request
+ * @param {import('express').Response} response Express response
+ */
+async function sendOpenAiResponsesRequest(request, response) {
+    const isCustom = request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM;
+    const secretKey = isCustom ? SECRET_KEYS.CUSTOM : SECRET_KEYS.OPENAI;
+    const apiKey = !isCustom && request.body.reverse_proxy
+        ? request.body.proxy_password
+        : readSecret(request.user.directories, secretKey, request.body.secret_id);
+
+    const baseUrl = isCustom
+        ? trimTrailingSlash(String(request.body.custom_url || ''))
+        : trimTrailingSlash(String(request.body.reverse_proxy || API_OPENAI));
+
+    if (!baseUrl) {
+        console.warn('No API URL provided for the Responses API.');
+        return response.status(400).send({ error: true });
+    }
+
+    if (!apiKey && !request.body.reverse_proxy && !isCustom) {
+        console.warn('OpenAI API key is missing.');
+        return response.status(400).send({ error: true });
+    }
+
+    const { instructions, input } = convertResponsesApiMessages(request.body.messages, getPromptNames(request));
+
+    /** @type {Record<string, any>} */
+    const requestBody = {
+        model: request.body.model,
+        input: input,
+        stream: Boolean(request.body.stream),
+        // The API stores responses for 30 days by default. Chat content here is
+        // the user's private roleplay, so opt out unless asked otherwise.
+        store: request.body.store === true,
+    };
+
+    if (instructions) {
+        requestBody.instructions = instructions;
+    }
+
+    if (typeof request.body.temperature === 'number') {
+        requestBody.temperature = request.body.temperature;
+    }
+
+    if (typeof request.body.top_p === 'number') {
+        requestBody.top_p = request.body.top_p;
+    }
+
+    const maxOutputTokens = request.body.max_output_tokens ?? request.body.max_tokens;
+    if (typeof maxOutputTokens === 'number' && maxOutputTokens > 0) {
+        requestBody.max_output_tokens = maxOutputTokens;
+    }
+
+    // `frequency_penalty` and `presence_penalty` have no Responses API
+    // equivalent, so they are deliberately not forwarded.
+
+    const reasoning = {};
+    if (request.body.reasoning_effort) {
+        reasoning.effort = OPENAI_REASONING_EFFORT_MAP[request.body.reasoning_effort] ?? request.body.reasoning_effort;
+    }
+    if (request.body.include_reasoning) {
+        // Raw chain of thought is not exposed; a summary is what the API offers.
+        reasoning.summary = 'auto';
+    }
+    if (Object.keys(reasoning).length > 0) {
+        requestBody.reasoning = reasoning;
+    }
+
+    const text = {};
+    if (request.body.json_schema) {
+        text.format = {
+            type: 'json_schema',
+            name: request.body.json_schema.name,
+            schema: request.body.json_schema.value,
+            strict: request.body.json_schema.strict ?? true,
+        };
+    }
+    if (request.body.verbosity && OPENAI_VERBOSITY_MODELS.test(String(request.body.model))) {
+        text.verbosity = request.body.verbosity;
+    }
+    if (Object.keys(text).length > 0) {
+        requestBody.text = text;
+    }
+
+    if (isCustom) {
+        mergeObjectWithYaml(requestBody, request.body.custom_include_body);
+        excludeKeysByYaml(requestBody, request.body.custom_exclude_body);
+    }
+
+    /** @type {Record<string, string>} */
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) {
+        headers['Authorization'] = 'Bearer ' + apiKey;
+    }
+    if (isCustom) {
+        mergeObjectWithYaml(headers, request.body.custom_include_headers);
+    }
+
+    const controller = new AbortController();
+    request.socket.removeAllListeners('close');
+    request.socket.on('close', function () {
+        controller.abort();
+    });
+
+    const endpointUrl = urlJoin(baseUrl, '/responses');
+
+    try {
+        // At most one attempt per droppable parameter, plus the first.
+        for (let attempt = 0; attempt <= RESPONSES_OPTIONAL_PARAMS.length; attempt++) {
+            console.debug('Responses API request:', requestBody);
+
+            const fetchResponse = await fetch(endpointUrl, {
+                method: 'post',
+                headers: headers,
+                body: JSON.stringify(requestBody),
+                signal: controller.signal,
+            });
+
+            if (fetchResponse.ok) {
+                if (requestBody.stream) {
+                    console.info('Streaming request in progress');
+                    return await forwardFetchResponse(fetchResponse, response);
+                }
+
+                /** @type {any} */
+                const json = await fetchResponse.json();
+                console.debug('Responses API response:', json);
+                return response.send(json);
+            }
+
+            const responseText = await fetchResponse.text();
+            const errorData = tryParse(responseText);
+
+            // Nothing has been written to the client yet, so a retry is safe.
+            if (fetchResponse.status === 400) {
+                const unsupported = getUnsupportedResponsesParam(errorData);
+                if (unsupported && unsupported in requestBody) {
+                    console.warn(`Responses API rejected '${unsupported}' for model ${requestBody.model}; retrying without it.`);
+                    delete requestBody[unsupported];
+                    continue;
+                }
+            }
+
+            const message = errorData?.error?.message || fetchResponse.statusText || 'Unknown error occurred';
+            const quota_error = fetchResponse.status === 429 && errorData?.error?.type === 'insufficient_quota';
+            console.error('Responses API request error:', message, responseText);
+
+            if (!response.headersSent) {
+                return response.status(500).send({ error: { message }, quota_error: quota_error });
+            }
+            if (!response.writableEnded) {
+                response.write(responseText);
+            }
+            return response.end();
+        }
+
+        console.error('Responses API request failed after dropping every optional parameter.');
+        if (!response.headersSent) {
+            return response.status(500).send({ error: { message: 'The model rejected every supported parameter combination.' } });
+        }
+        return response.end();
+    } catch (error) {
+        console.error('Responses API generation failed', error);
+        if (!response.headersSent) {
+            return response.status(500).send({ error: true });
+        }
+        return response.end();
+    }
+}
+
 async function sendAzureOpenAIRequest(request, response) {
     // 1. GATHER & VALIDATE SETTINGS
     const { azure_base_url, azure_deployment_name, azure_api_version } = request.body;
@@ -2169,6 +2383,13 @@ router.post('/generate', async function (request, response) {
 
         if (request.body.json_schema?.value) {
             request.body.json_schema.value = flattenSchema(request.body.json_schema.value, request.body.chat_completion_source);
+        }
+
+        // The Responses API is a different endpoint on the same providers, so it
+        // is opted into per request rather than being its own source.
+        const responsesApiSources = [CHAT_COMPLETION_SOURCES.OPENAI, CHAT_COMPLETION_SOURCES.CUSTOM];
+        if (request.body.use_responses_api && responsesApiSources.includes(request.body.chat_completion_source)) {
+            return await sendOpenAiResponsesRequest(request, response);
         }
 
         switch (request.body.chat_completion_source) {

@@ -1261,3 +1261,147 @@ describe('cachingAtDepthForOpenRouterClaude', () => {
         expect(typeof messages[1].content).toBe('string');
     });
 });
+
+describe('convertResponsesApiMessages', () => {
+    const names = makeNames('Seraphina', 'Alex');
+
+    test('returns empty output for a non-array', () => {
+        expect(mod.convertResponsesApiMessages(null, names)).toEqual({ instructions: '', input: [] });
+    });
+
+    test('hoists the opening system message into instructions', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'system', content: 'Play Seraphina.' },
+            { role: 'user', content: 'Where am I?' },
+        ], names);
+        expect(result.instructions).toBe('Play Seraphina.');
+        expect(result.input).toEqual([{ role: 'user', content: 'Where am I?' }]);
+    });
+
+    test('joins several opening system messages', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'system', content: 'First.' },
+            { role: 'system', content: 'Second.' },
+            { role: 'user', content: 'Hi' },
+        ], names);
+        expect(result.instructions).toBe('First.\n\nSecond.');
+    });
+
+    test('treats developer role as system', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'developer', content: 'Rules.' },
+        ], names);
+        expect(result.instructions).toBe('Rules.');
+        expect(result.input).toEqual([]);
+    });
+
+    test('keeps a trailing system message in place as an input item', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'system', content: 'Play Seraphina.' },
+            { role: 'user', content: 'Hi' },
+            { role: 'system', content: 'Stay in character.' },
+        ], names);
+        expect(result.instructions).toBe('Play Seraphina.');
+        expect(result.input).toEqual([
+            { role: 'user', content: 'Hi' },
+            { role: 'system', content: 'Stay in character.' },
+        ]);
+    });
+
+    test('stops hoisting at a named system message so example dialogue survives', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'system', content: 'Play Seraphina.' },
+            { role: 'system', name: 'example_user', content: 'Describe yourself.' },
+            { role: 'system', name: 'example_assistant', content: 'I guard this forest.' },
+            { role: 'user', content: 'Hi' },
+        ], names);
+        expect(result.instructions).toBe('Play Seraphina.');
+        expect(result.input).toEqual([
+            { role: 'system', content: 'Alex: Describe yourself.' },
+            { role: 'system', content: 'Seraphina: I guard this forest.' },
+            { role: 'user', content: 'Hi' },
+        ]);
+    });
+
+    test('does not double-prefix a speaker that is already there', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'assistant', name: 'example_assistant', content: 'Seraphina: Already prefixed.' },
+        ], names);
+        expect(result.input[0].content).toBe('Seraphina: Already prefixed.');
+    });
+
+    test('prefixes an arbitrary name verbatim', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'assistant', name: 'Bob', content: 'Hello.' },
+        ], names);
+        expect(result.input[0].content).toBe('Bob: Hello.');
+    });
+
+    test('leaves a group member message alone when it already names the speaker', () => {
+        const groupNames = makeNames('Seraphina', 'Alex', ['Aqua']);
+        const result = mod.convertResponsesApiMessages([
+            { role: 'assistant', name: 'example_assistant', content: 'Aqua: Hello!' },
+        ], groupNames);
+        expect(result.input[0].content).toBe('Aqua: Hello!');
+    });
+
+    test('uses input_text for user parts and output_text for assistant parts', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'user', content: [{ type: 'text', text: 'look' }] },
+            { role: 'assistant', content: [{ type: 'text', text: 'saw' }] },
+        ], names);
+        expect(result.input).toEqual([
+            { role: 'user', content: [{ type: 'input_text', text: 'look' }] },
+            { role: 'assistant', content: [{ type: 'output_text', text: 'saw' }] },
+        ]);
+    });
+
+    test('converts an image part', () => {
+        const result = mod.convertResponsesApiMessages([
+            {
+                role: 'user',
+                content: [
+                    { type: 'text', text: 'what is this' },
+                    { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+                ],
+            },
+        ], names);
+        expect(result.input[0].content).toEqual([
+            { type: 'input_text', text: 'what is this' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAA' },
+        ]);
+    });
+
+    test('flattens a multipart opening system message into instructions', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'system', content: [{ type: 'text', text: 'Part one. ' }, { type: 'text', text: 'Part two.' }] },
+        ], names);
+        expect(result.instructions).toBe('Part one. Part two.');
+    });
+
+    test('drops tool messages', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'user', content: 'Hi' },
+            { role: 'tool', content: '{"ok":true}' },
+        ], names);
+        expect(result.input).toEqual([{ role: 'user', content: 'Hi' }]);
+    });
+
+    test('skips empty opening system messages', () => {
+        const result = mod.convertResponsesApiMessages([
+            { role: 'system', content: '   ' },
+            { role: 'user', content: 'Hi' },
+        ], names);
+        expect(result.instructions).toBe('');
+    });
+
+    test('ignores malformed entries', () => {
+        const result = mod.convertResponsesApiMessages([null, 'nope', { role: 'user', content: 'Hi' }], names);
+        expect(result.input).toEqual([{ role: 'user', content: 'Hi' }]);
+    });
+
+    test('defaults a missing role to user', () => {
+        const result = mod.convertResponsesApiMessages([{ content: 'Hi' }], names);
+        expect(result.input).toEqual([{ role: 'user', content: 'Hi' }]);
+    });
+});

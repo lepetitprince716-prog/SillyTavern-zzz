@@ -2,10 +2,16 @@ import { Check, ExternalLink, KeyRound, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { personaAvatarUrl } from '@/api/characters';
-import { SOURCES_WITH_MODEL_LIST, SUGGESTED_MODELS } from '@/api/generate';
+import { RESPONSES_API_SOURCES, SOURCES_WITH_MODEL_LIST, SUGGESTED_MODELS } from '@/api/generate';
 import { queryKeys, useModels, usePersonas, useSecretState, useVersion } from '@/api/queries';
 import { hasSecret, SECRET_KEY_BY_SOURCE, writeSecret } from '@/api/settings';
-import { CHAT_COMPLETION_SOURCES, SOURCE_LABELS, type ChatCompletionSource } from '@/api/types';
+import {
+    CHAT_COMPLETION_SOURCES,
+    REASONING_EFFORTS,
+    SOURCE_LABELS,
+    type ChatCompletionSource,
+    type ReasoningEffort,
+} from '@/api/types';
 import { Avatar } from '@/components/ui/Avatar';
 import {
     SegmentedControl,
@@ -182,13 +188,38 @@ function ConnectionTab() {
                     </Button>
                 </div>
             </Field>
+
+            {RESPONSES_API_SOURCES.has(connection.source) ? (
+                <div className="space-y-2 border-t border-border pt-4">
+                    <ToggleRow
+                        label="Use the Responses API"
+                        description="Sends to /v1/responses instead of /v1/chat/completions. Required by some newer reasoning models; frequency and presence penalties are not supported there and are dropped."
+                        checked={connection.useResponsesApi}
+                        onCheckedChange={(useResponsesApi) => setConnection({ useResponsesApi })}
+                    />
+                    {connection.useResponsesApi ? (
+                        <p className="rounded-lg bg-surface-2 px-3 py-2 text-xs leading-relaxed text-muted">
+                            Requests are sent with <code className="font-mono">store: false</code>, so the
+                            provider is asked not to retain the conversation. Reasoning options live under
+                            Sampling.
+                        </p>
+                    ) : null}
+                </div>
+            ) : null}
         </div>
     );
 }
 
+const REASONING_EFFORT_OPTIONS = REASONING_EFFORTS.map((effort) => ({
+    value: effort,
+    label: effort === 'default' ? 'Model default' : effort,
+}));
+
 function GenerationTab() {
     const sampling = useSessionStore((state) => state.sampling);
     const setSampling = useSessionStore((state) => state.setSampling);
+    const connection = useSessionStore((state) => state.connection);
+    const onResponsesApi = connection.useResponsesApi && RESPONSES_API_SOURCES.has(connection.source);
 
     return (
         <div className="space-y-5">
@@ -229,25 +260,53 @@ function GenerationTab() {
                 format={(value) => value.toFixed(2)}
             />
 
-            <Slider
-                label="Frequency penalty"
-                value={sampling.frequencyPenalty}
-                onValueChange={(frequencyPenalty) => setSampling({ frequencyPenalty })}
-                min={-2}
-                max={2}
-                step={0.05}
-                format={(value) => value.toFixed(2)}
-            />
+            <div className={cn('space-y-5', onResponsesApi && 'opacity-50')}>
+                <Slider
+                    label="Frequency penalty"
+                    value={sampling.frequencyPenalty}
+                    onValueChange={(frequencyPenalty) => setSampling({ frequencyPenalty })}
+                    min={-2}
+                    max={2}
+                    step={0.05}
+                    format={(value) => value.toFixed(2)}
+                />
 
-            <Slider
-                label="Presence penalty"
-                value={sampling.presencePenalty}
-                onValueChange={(presencePenalty) => setSampling({ presencePenalty })}
-                min={-2}
-                max={2}
-                step={0.05}
-                format={(value) => value.toFixed(2)}
-            />
+                <Slider
+                    label="Presence penalty"
+                    value={sampling.presencePenalty}
+                    onValueChange={(presencePenalty) => setSampling({ presencePenalty })}
+                    min={-2}
+                    max={2}
+                    step={0.05}
+                    format={(value) => value.toFixed(2)}
+                />
+            </div>
+            {onResponsesApi ? (
+                <p className="text-xs leading-relaxed text-subtle">
+                    The Responses API has no equivalent for these two penalties, so they are not sent
+                    while it is enabled.
+                </p>
+            ) : null}
+
+            <div className="space-y-4 border-t border-border pt-4">
+                <Field
+                    label="Reasoning effort"
+                    hint="How much thinking the model does before answering. Ignored by models without a reasoning budget; if a model rejects the value, the request is retried without it."
+                >
+                    <Select
+                        value={sampling.reasoningEffort}
+                        onValueChange={(value) => setSampling({ reasoningEffort: value as ReasoningEffort })}
+                        options={REASONING_EFFORT_OPTIONS}
+                    />
+                </Field>
+
+                <ToggleRow
+                    label="Show reasoning"
+                    description="Ask for a summary of the model's reasoning and render it above the reply."
+                    checked={sampling.includeReasoning}
+                    onCheckedChange={(includeReasoning) => setSampling({ includeReasoning })}
+                />
+            </div>
         </div>
     );
 }

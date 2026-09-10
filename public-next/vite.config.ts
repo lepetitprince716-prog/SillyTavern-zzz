@@ -20,6 +20,7 @@ const PROXIED_PATHS = [
     '/User Avatars',
     '/user',
     '/login',
+    '/favicon.ico',
 ];
 
 export default defineConfig({

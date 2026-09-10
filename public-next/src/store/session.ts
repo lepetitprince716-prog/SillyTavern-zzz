@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ChatCompletionSource } from '@/api/types';
+import type { ChatCompletionSource, ReasoningEffort } from '@/api/types';
 
 /** Everything needed to talk to a provider, minus the API key. */
 export interface ConnectionSettings {
@@ -8,6 +8,11 @@ export interface ConnectionSettings {
     model: string;
     /** Base URL for the `custom` source. */
     customUrl: string;
+    /**
+     * Route generations through the OpenAI Responses API instead of Chat
+     * Completions. Only meaningful for the `openai` and `custom` sources.
+     */
+    useResponsesApi: boolean;
 }
 
 /** Sampling knobs exposed in the UI. */
@@ -18,6 +23,10 @@ export interface SamplingSettings {
     frequencyPenalty: number;
     presencePenalty: number;
     stream: boolean;
+    /** Reasoning budget; `default` leaves the choice to the model. */
+    reasoningEffort: ReasoningEffort;
+    /** Request reasoning summaries and show them above the reply. */
+    includeReasoning: boolean;
 }
 
 /** How the character and persona are turned into a system prompt. */
@@ -62,6 +71,7 @@ export const useSessionStore = create<SessionState>()(
                 source: 'openai',
                 model: '',
                 customUrl: '',
+                useResponsesApi: false,
             },
             sampling: {
                 temperature: 0.9,
@@ -70,6 +80,8 @@ export const useSessionStore = create<SessionState>()(
                 frequencyPenalty: 0,
                 presencePenalty: 0,
                 stream: true,
+                reasoningEffort: 'default',
+                includeReasoning: true,
             },
             prompt: {
                 systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -95,6 +107,24 @@ export const useSessionStore = create<SessionState>()(
         {
             name: 'st-next:session',
             version: 1,
+            /**
+             * Deep-merge the nested groups.
+             *
+             * The default merge is shallow, so a state saved before a new
+             * setting existed would replace the whole group and leave that
+             * setting undefined. Merging per group keeps new defaults intact
+             * across upgrades.
+             */
+            merge: (persisted, current) => {
+                const saved = (persisted ?? {}) as Partial<SessionState>;
+                return {
+                    ...current,
+                    ...saved,
+                    connection: { ...current.connection, ...saved.connection },
+                    sampling: { ...current.sampling, ...saved.sampling },
+                    prompt: { ...current.prompt, ...saved.prompt },
+                };
+            },
         },
     ),
 );

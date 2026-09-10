@@ -115,7 +115,15 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
 
     // Identity of the open chat: remounting on change resets per-chat view
     // state (scroll position, composer draft) without reset effects.
+    //
+    // The two keys must differ from each other. React reconciles siblings
+    // through a Map keyed by `key`, so two siblings sharing one key lose the
+    // first fiber to the second and the displaced subtree is never unmounted —
+    // one leaked message list per chat switch. React only warns about
+    // duplicate keys in development builds.
     const chatKey = `${character.avatar}:${fileFromRoute ?? ''}`;
+    const messagesKey = `messages:${chatKey}`;
+    const composerKey = `composer:${chatKey}`;
 
     const connectionLabel = connection.model
         ? `${SOURCE_LABELS[connection.source]} · ${connection.model}`
@@ -143,7 +151,7 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                     <ChatSkeleton />
                 ) : (
                     <MessageList
-                        key={chatKey}
+                        key={messagesKey}
                         session={session}
                         characterAvatar={character.avatar}
                         personaAvatar={personaAvatar}
@@ -152,7 +160,7 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                 )}
 
                 <Composer
-                    key={chatKey}
+                    key={composerKey}
                     chatId={chatKey}
                     isGenerating={session.isGenerating}
                     onSend={session.send}

@@ -285,6 +285,9 @@ export function useChatSession(character: Character | null, fileName: string | n
                 stream: sampling.stream,
                 characterName: character.name,
                 userName,
+                useResponsesApi: connection.useResponsesApi,
+                reasoningEffort: sampling.reasoningEffort,
+                includeReasoning: sampling.includeReasoning,
                 signal: controller.signal,
                 ...(connection.customUrl ? { customUrl: connection.customUrl } : {}),
             };
@@ -377,6 +380,7 @@ export function useChatSession(character: Character | null, fileName: string | n
             connection.customUrl,
             connection.model,
             connection.source,
+            connection.useResponsesApi,
             sampling,
             userName,
             buildFor,

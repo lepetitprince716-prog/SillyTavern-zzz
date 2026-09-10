@@ -169,6 +169,34 @@ function googleDelta(payload: unknown): Delta {
     return { text, reasoning };
 }
 
+/**
+ * OpenAI Responses API events.
+ *
+ * A different endpoint from Chat Completions with its own event vocabulary:
+ * semantic events named `response.*`, each carrying its increment in `delta`.
+ * Only the `.delta` events are consumed — the matching `.done` events repeat
+ * the whole value and would double the text.
+ */
+function responsesDelta(payload: unknown, eventType: string): Delta {
+    const type = asString(get(payload, 'type')) || eventType;
+    switch (type) {
+        case 'response.output_text.delta':
+        case 'response.refusal.delta':
+            return { text: asString(get(payload, 'delta')), reasoning: '' };
+        case 'response.reasoning_summary_text.delta':
+        case 'response.reasoning_text.delta':
+            return { text: '', reasoning: asString(get(payload, 'delta')) };
+        default:
+            return EMPTY;
+    }
+}
+
+/** True for a payload or event name from the Responses API. */
+export function isResponsesEvent(payload: unknown, eventType: string): boolean {
+    const type = asString(get(payload, 'type')) || eventType;
+    return type.startsWith('response.') || type === 'response';
+}
+
 /** Cohere's chat stream. */
 function cohereDelta(payload: unknown): Delta {
     const eventType = asString(get(payload, 'event_type'));
@@ -180,10 +208,24 @@ function cohereDelta(payload: unknown): Delta {
 
 /**
  * Normalises one parsed SSE payload into an incremental delta.
- * Unknown shapes yield empty strings rather than throwing, so a provider we do
- * not model yet degrades to "no visible tokens" instead of a broken stream.
+ *
+ * Responses API events are recognised by their own event names before the
+ * provider is consulted, so an OpenAI-compatible endpoint that implements that
+ * API works without extra configuration. Unknown shapes yield empty strings
+ * rather than throwing, so a provider we do not model yet degrades to "no
+ * visible tokens" instead of a broken stream.
+ *
+ * @param eventType The SSE `event:` field, used when the payload omits `type`.
  */
-export function extractDelta(source: ChatCompletionSource, payload: unknown): Delta {
+export function extractDelta(
+    source: ChatCompletionSource,
+    payload: unknown,
+    eventType = '',
+): Delta {
+    if (isResponsesEvent(payload, eventType)) {
+        return responsesDelta(payload, eventType);
+    }
+
     switch (source) {
         case 'claude':
             return claudeDelta(payload);
@@ -194,6 +236,35 @@ export function extractDelta(source: ChatCompletionSource, payload: unknown): De
         default:
             return openAiDelta(payload);
     }
+}
+
+/**
+ * Extracts a fatal error message from a stream payload, if it carries one.
+ *
+ * Three shapes appear in practice: an `{ error: … }` wrapper (Chat
+ * Completions), a bare Responses `error` event, and a `response.failed` event
+ * whose error hangs off the response object.
+ * @returns The message, or null when the payload is not an error.
+ */
+export function extractStreamError(payload: unknown, eventType: string): string | null {
+    const type = asString(get(payload, 'type')) || eventType;
+
+    if (type === 'error') {
+        return asString(get(payload, 'message')) || 'The provider reported an error.';
+    }
+
+    if (type === 'response.failed' || type === 'response.incomplete') {
+        const inner = get(get(payload, 'response'), 'error') ?? get(get(payload, 'response'), 'incomplete_details');
+        const message = asString(get(inner, 'message')) || asString(get(inner, 'reason'));
+        return message || 'The provider did not finish the response.';
+    }
+
+    const error = get(payload, 'error');
+    if (error) {
+        return asString(get(error, 'message')) || JSON.stringify(error);
+    }
+
+    return null;
 }
 
 /** Reason a stream stopped, surfaced to the UI. */
@@ -242,13 +313,12 @@ export async function* streamCompletion(
                 continue; // Keep-alive noise or a partial frame we cannot use.
             }
 
-            const error = get(payload, 'error');
+            const error = extractStreamError(payload, event.type);
             if (error) {
-                const message = asString(get(error, 'message')) || JSON.stringify(error);
-                throw new Error(message);
+                throw new Error(error);
             }
 
-            const delta = extractDelta(source, payload);
+            const delta = extractDelta(source, payload, event.type);
             if (delta.text) {
                 text += delta.text;
                 deltaText += delta.text;

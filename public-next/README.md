@@ -72,14 +72,45 @@ in three long-lived chunks, plus 9 KB of CSS.
 - **Providers** — OpenAI, Anthropic, OpenRouter, Google AI Studio, DeepSeek,
   Mistral, xAI, Cohere, and any OpenAI-compatible endpoint. API keys are written
   to the server's `secrets.json`; they never touch browser storage.
-- **Reasoning** — separately streamed reasoning tokens and inline `<think>`
-  blocks both render as a collapsible block.
+- **OpenAI Responses API** — an opt-in switch routes generations to
+  `/v1/responses` instead of `/v1/chat/completions`, for models that want it.
+  See [Responses API](#responses-api) below.
+- **Reasoning** — reasoning summaries from the Responses API, separately
+  streamed reasoning tokens, and inline `<think>` blocks all render as a
+  collapsible block.
 - **Appearance** — light/dark/system, three densities, sans or serif message
   typeface, message size, and an accent hue slider that drives the whole OKLCH
   palette from one variable.
 - **Keyboard** — `⌘K`/`Ctrl+K` command palette, `⌘,` settings, `Enter` to send
   (or `⌘↩`, configurable), `⌘↩` to save an edit, `Esc` to cancel.
 - **Responsive** — one layout from 390 px to ultrawide, with safe-area insets.
+
+## Responses API
+
+`/v1/responses` is a different endpoint from Chat Completions, with its own
+request shape and its own streaming vocabulary. Turn it on under
+**Settings → API** for the OpenAI source, or for a custom endpoint that
+implements it. Three things are worth knowing:
+
+- **Nothing is stored.** The API retains responses for 30 days when `store` is
+  omitted, so the server always sends `store: false`.
+- **Penalties are dropped.** The API has no `frequency_penalty` or
+  `presence_penalty`, so those two sliders are not sent while it is on, and the
+  UI says so rather than pretending they apply.
+- **Rejected parameters self-heal.** Reasoning models refuse `temperature` and
+  `top_p`, and which model refuses what keeps changing. Rather than hard-coding
+  model families, the server reads the 400 back, drops the parameter it names,
+  and retries — so a model released after this code was written still works.
+
+The system prompt is hoisted into `instructions`; a trailing system message
+stays in `input` where it is, because in a roleplay prompt a final instruction's
+position is the point. Example dialogue keeps its speaker names, which
+`instructions` could not carry.
+
+Server side this is `sendOpenAiResponsesRequest` in
+`src/endpoints/backends/chat-completions.js` plus `convertResponsesApiMessages`
+in `src/prompt-converters.js`, reached by sending `use_responses_api: true`. The
+classic UI never sends it, so it keeps using Chat Completions.
 
 ## What it does not do yet
 
@@ -119,14 +150,31 @@ from `src/server-main.js`.
 
 ## Testing
 
-`npm run next:test` covers the parts where a bug is silent and expensive:
+Three layers, all runnable locally.
+
+`npm run next:test` — unit tests for the parts where a bug is silent and
+expensive:
 
 - SSE frame splitting across arbitrary chunk boundaries, and delta extraction
-  for the OpenAI, Anthropic, Google and Cohere stream shapes.
+  for the OpenAI, Anthropic, Google, Cohere and Responses API stream shapes.
 - Macro substitution, including nesting, dice, and self-reference.
 - Prompt assembly — role mapping, swipe selection, card overrides, ordering.
 - Markdown sanitisation — script tags, event handlers, `javascript:` URLs.
 - Chat file parsing and the legacy timestamp format, which both interfaces read.
+
+`npm run test:unit --prefix tests` — the repo's own jest suite, which covers
+`convertResponsesApiMessages` alongside the other prompt converters.
+
+`npm run test:e2e --prefix tests` — Playwright smoke tests in
+`tests/next-frontend.e2e.js`, against a built bundle and a running server. They
+assert the shell boots, deep links resolve, the main surfaces open without a
+crash, and switching chats leaves exactly one message list mounted.
+
+One note on verification: run `npm run next:dev` and watch the browser console
+at least once before shipping a change. React's duplicate-key and
+state-in-effect warnings exist only in development builds — a production bundle
+is silent about both, and a duplicate key on two sibling components is how a
+leaked message list got shipped once already.
 
 ## License
 

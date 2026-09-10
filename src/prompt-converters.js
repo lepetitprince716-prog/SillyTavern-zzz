@@ -810,6 +810,129 @@ export function convertXAIMessages(messages, names) {
 }
 
 /**
+ * Folds a message's `name` into its text.
+ *
+ * Responses API input items have no `name` field, so the speaker has to live in
+ * the text itself or example dialogue loses track of who said what.
+ * @param {string} text Message text
+ * @param {string} name Message name
+ * @param {PromptNames} names Prompt names
+ * @returns {string} Text with the speaker prefixed, if it was not already
+ */
+function prefixSpeaker(text, name, names) {
+    const speaker = name === 'example_assistant'
+        ? names.charName
+        : name === 'example_user'
+            ? names.userName
+            : name;
+
+    if (!speaker || text.startsWith(`${speaker}: `) || names.startsWithGroupName(text)) {
+        return text;
+    }
+
+    return `${speaker}: ${text}`;
+}
+
+/**
+ * Converts message content into Responses API content parts.
+ *
+ * A plain string is passed through, which the API accepts and which keeps the
+ * common case simple. Arrays are mapped part by part: text parts use
+ * `output_text` for assistant turns and `input_text` everywhere else, because
+ * the API rejects the wrong one for the role.
+ * @param {string} role Message role
+ * @param {any} content Message content
+ * @returns {any} Content for a Responses API input item
+ */
+function convertResponsesContent(role, content) {
+    if (typeof content === 'string') {
+        return content;
+    }
+
+    if (!Array.isArray(content)) {
+        return String(content ?? '');
+    }
+
+    const textType = role === 'assistant' ? 'output_text' : 'input_text';
+
+    return content.map((part) => {
+        if (part?.type === 'text') {
+            return { type: textType, text: String(part.text ?? '') };
+        }
+        if (part?.type === 'image_url' && part?.image_url?.url) {
+            return { type: 'input_image', image_url: String(part.image_url.url) };
+        }
+        return part;
+    });
+}
+
+/**
+ * Converts Chat Completions messages into the OpenAI Responses API format.
+ *
+ * The opening run of unnamed system messages is hoisted into `instructions`,
+ * which is where the Responses API expects the top-level system prompt.
+ * Hoisting stops at the first message that is anything else, which keeps two
+ * things intact:
+ *  - example dialogue, which arrives as system messages carrying an
+ *    `example_user` / `example_assistant` name that `instructions` cannot hold;
+ *  - a trailing system message, which in a roleplay prompt is a final
+ *    instruction whose position is the whole point.
+ *
+ * Tool messages are dropped — this converter covers plain text generation, and
+ * a `tool` role has no direct Responses API input equivalent.
+ * @param {any[]} messages Chat Completions messages
+ * @param {PromptNames} names Prompt names
+ * @returns {{instructions: string, input: any[]}} Responses API instructions and input
+ */
+export function convertResponsesApiMessages(messages, names) {
+    if (!Array.isArray(messages)) {
+        return { instructions: '', input: [] };
+    }
+
+    const instructions = [];
+    const input = [];
+    let hoisting = true;
+
+    for (const message of messages) {
+        if (!message || typeof message !== 'object') {
+            continue;
+        }
+
+        const role = String(message.role ?? 'user');
+
+        if (role === 'tool' || role === 'function') {
+            continue;
+        }
+
+        const isSystem = role === 'system' || role === 'developer';
+
+        if (hoisting && isSystem && !message.name) {
+            const flat = typeof message.content === 'string'
+                ? message.content
+                : convertResponsesContent(role, message.content)
+                    .map(part => String(part?.text ?? ''))
+                    .join('');
+            if (flat.trim()) {
+                instructions.push(flat);
+            }
+            continue;
+        }
+
+        hoisting = false;
+
+        let content = convertResponsesContent(role, message.content);
+
+        if (message.name && typeof content === 'string') {
+            content = prefixSpeaker(content, String(message.name), names);
+        }
+
+        input.push({ role: isSystem ? 'system' : role, content });
+    }
+
+    return { instructions: instructions.join('\n\n'), input };
+}
+
+/**
  * Merge messages with the same consecutive role, removing names if they exist.
  * @param {any[]} messages Messages to merge
  * @param {PromptNames} names Prompt names

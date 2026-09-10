@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSseSplitter, extractDelta, streamCompletion } from './sse';
+import { createSseSplitter, extractDelta, extractStreamError, isResponsesEvent, streamCompletion } from './sse';
 
 function textStream(chunks: string[]): Response {
     const stream = new ReadableStream<Uint8Array>({
@@ -170,5 +170,131 @@ describe('streamCompletion', () => {
         }
         expect(last.reasoning).toBe('hm');
         expect(last.text).toBe('done');
+    });
+});
+
+describe('Responses API events', () => {
+    it('recognises an event by its payload type', () => {
+        expect(isResponsesEvent({ type: 'response.output_text.delta' }, '')).toBe(true);
+        expect(isResponsesEvent({}, 'response.completed')).toBe(true);
+        expect(isResponsesEvent({ choices: [] }, 'message')).toBe(false);
+    });
+
+    it('reads output text deltas', () => {
+        const delta = extractDelta('openai', { type: 'response.output_text.delta', delta: 'Hi' });
+        expect(delta).toEqual({ text: 'Hi', reasoning: '' });
+    });
+
+    it('falls back to the SSE event name when the payload omits type', () => {
+        const delta = extractDelta('openai', { delta: 'Hi' }, 'response.output_text.delta');
+        expect(delta.text).toBe('Hi');
+    });
+
+    it('reads reasoning summary deltas as reasoning', () => {
+        const delta = extractDelta('openai', {
+            type: 'response.reasoning_summary_text.delta',
+            delta: 'weighing options',
+        });
+        expect(delta).toEqual({ text: '', reasoning: 'weighing options' });
+    });
+
+    it('reads raw reasoning text deltas as reasoning', () => {
+        const delta = extractDelta('openai', { type: 'response.reasoning_text.delta', delta: 'hm' });
+        expect(delta.reasoning).toBe('hm');
+    });
+
+    it('surfaces a refusal as visible text', () => {
+        const delta = extractDelta('openai', { type: 'response.refusal.delta', delta: 'I cannot' });
+        expect(delta.text).toBe('I cannot');
+    });
+
+    it('ignores the done events so text is not duplicated', () => {
+        expect(extractDelta('openai', { type: 'response.output_text.done', text: 'Hello' })).toEqual({
+            text: '',
+            reasoning: '',
+        });
+        expect(extractDelta('openai', { type: 'response.completed', response: {} })).toEqual({
+            text: '',
+            reasoning: '',
+        });
+    });
+
+    it('is used for a custom source too, since the endpoint may implement it', () => {
+        const delta = extractDelta('custom', { type: 'response.output_text.delta', delta: 'x' });
+        expect(delta.text).toBe('x');
+    });
+
+    it('streams a full Responses sequence into cumulative text', async () => {
+        const frames = [
+            'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1"}}\n\n',
+            'event: response.output_item.added\ndata: {"type":"response.output_item.added"}\n\n',
+            'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":"think"}\n\n',
+            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hel"}\n\n',
+            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"lo"}\n\n',
+            'event: response.output_text.done\ndata: {"type":"response.output_text.done","text":"Hello"}\n\n',
+            'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        ];
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                const encoder = new TextEncoder();
+                for (const frame of frames) {
+                    controller.enqueue(encoder.encode(frame));
+                }
+                controller.close();
+            },
+        });
+
+        let last = { text: '', reasoning: '' };
+        for await (const chunk of streamCompletion(new Response(stream), 'openai')) {
+            last = chunk;
+        }
+        expect(last.text).toBe('Hello');
+        expect(last.reasoning).toBe('think');
+    });
+
+    it('throws on a bare Responses error event', async () => {
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(
+                    new TextEncoder().encode('event: error\ndata: {"type":"error","code":"server_error","message":"boom"}\n\n'),
+                );
+                controller.close();
+            },
+        });
+        await expect(async () => {
+            for await (const _chunk of streamCompletion(new Response(stream), 'openai')) {
+                // consume
+            }
+        }).rejects.toThrow('boom');
+    });
+});
+
+describe('extractStreamError', () => {
+    it('reads a Chat Completions error wrapper', () => {
+        expect(extractStreamError({ error: { message: 'rate limited' } }, 'message')).toBe('rate limited');
+    });
+
+    it('reads a bare Responses error event', () => {
+        expect(extractStreamError({ type: 'error', message: 'boom' }, 'error')).toBe('boom');
+    });
+
+    it('reads response.failed', () => {
+        expect(
+            extractStreamError({ type: 'response.failed', response: { error: { message: 'refused' } } }, ''),
+        ).toBe('refused');
+    });
+
+    it('reads response.incomplete reasons', () => {
+        expect(
+            extractStreamError(
+                { type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } },
+                '',
+            ),
+        ).toBe('max_output_tokens');
+    });
+
+    it('returns null for an ordinary delta', () => {
+        expect(extractStreamError({ type: 'response.output_text.delta', delta: 'x' }, '')).toBeNull();
+        expect(extractStreamError({ choices: [{ delta: { content: 'x' } }] }, 'message')).toBeNull();
     });
 });
