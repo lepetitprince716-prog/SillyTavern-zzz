@@ -78,6 +78,58 @@ export function fetchSettings(signal?: AbortSignal): Promise<SettingsResponse> {
     return apiPost<SettingsResponse>('/api/settings/get', {}, { signal });
 }
 
+/** Any part of `settings.json`. Callers narrow it to the corner they own. */
+export interface SettingsDocument {
+    [key: string]: unknown;
+}
+
+/**
+ * The tail of the write queue.
+ *
+ * Module-level on purpose: the point is that *every* caller shares it, whoever
+ * initiated the change.
+ */
+let pendingWrite: Promise<unknown> = Promise.resolve();
+
+/**
+ * Applies a change to `settings.json`.
+ *
+ * `POST /api/settings/save` replaces the whole file, so a change is a read,
+ * a patch and a write. Two of those overlapping is silent data loss: the
+ * second read happens before the first write lands, and the second write puts
+ * the pre-first-change file back. Switching two extensions off in quick
+ * succession loses one of them, and so does renaming two personas.
+ *
+ * So the read-modify-write cycles are queued rather than run concurrently.
+ * A failed write does not block the queue — the next change reads the file as
+ * it actually is and proceeds.
+ *
+ * This cannot help with the classic interface saving the same file from
+ * another tab; nothing short of the server accepting a patch could.
+ *
+ * @param patch Pure function from the current document to the next one.
+ */
+export function updateSettings<T extends SettingsDocument>(
+    patch: (settings: T) => T,
+): Promise<void> {
+    const run = async (): Promise<void> => {
+        const response = await fetchSettings();
+        let settings: T;
+        try {
+            settings = JSON.parse(response.settings) as T;
+        } catch {
+            throw new Error('The settings file could not be read, so nothing was saved.');
+        }
+        await apiPost('/api/settings/save', patch(settings));
+    };
+
+    const next = pendingWrite.then(run, run);
+    // Swallowed only for the *queue*: the caller still gets `next`, rejection
+    // and all.
+    pendingWrite = next.catch(() => undefined);
+    return next;
+}
+
 interface PowerUserPersonas {
     personas?: Record<string, string>;
     persona_descriptions?: Record<string, { description?: string }>;

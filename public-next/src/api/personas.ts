@@ -9,7 +9,7 @@
  */
 
 import { apiPost, apiPostForm } from './client';
-import { fetchSettings } from './settings';
+import { updateSettings } from './settings';
 
 /** The persona-related corner of the `power_user` settings block. */
 export interface PersonaSettings {
@@ -87,18 +87,11 @@ export function patchPersonaSettings(
 /**
  * Reads the current settings, applies a persona change and writes it back.
  *
- * The read happens immediately before the write to keep the window in which
- * the classic interface could save over the same file as small as possible.
+ * Through the shared queue in `api/settings.ts`: the file is written whole, so
+ * two changes in flight at once means the later write drops the earlier one.
  */
-export async function savePersonaPatch(patch: PersonaPatch): Promise<void> {
-    const response = await fetchSettings();
-    let settings: SettingsDocument;
-    try {
-        settings = JSON.parse(response.settings) as SettingsDocument;
-    } catch {
-        throw new Error('The settings file could not be read, so the persona was not saved.');
-    }
-    await apiPost('/api/settings/save', patchPersonaSettings(settings, patch));
+export function savePersonaPatch(patch: PersonaPatch): Promise<void> {
+    return updateSettings<SettingsDocument>((settings) => patchPersonaSettings(settings, patch));
 }
 
 /**

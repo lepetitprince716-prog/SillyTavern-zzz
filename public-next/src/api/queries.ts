@@ -19,6 +19,7 @@ import {
     personasFromSettings,
     type Persona,
     type SecretState,
+    type SettingsResponse,
 } from './settings';
 import type { Character, ChatCompletionSource, ChatSummary, UserProfile, VersionInfo } from './types';
 import { fetchWorldInfoBook, fetchWorldInfoList, type WorldInfoBook, type WorldInfoSummary } from './worldinfo';
@@ -29,6 +30,7 @@ export const queryKeys = {
     chat: (avatar: string, fileName: string) => ['chat', avatar, fileName] as const,
     models: (source: ChatCompletionSource, customUrl: string) => ['models', source, customUrl] as const,
     secrets: ['secrets'] as const,
+    settings: ['settings'] as const,
     personas: ['personas'] as const,
     user: ['user'] as const,
     version: ['version'] as const,
@@ -96,6 +98,21 @@ export function useSecretState(): UseQueryResult<SecretState> {
         queryKey: queryKeys.secrets,
         queryFn: ({ signal }) => fetchSecretState(signal),
         staleTime: 30_000,
+    });
+}
+
+/**
+ * The raw `settings.json` blob.
+ *
+ * Separate from {@link usePersonas} because several features read different
+ * corners of the same file, and one query means one fetch and one cache entry
+ * they all invalidate together.
+ */
+export function useSettings(): UseQueryResult<SettingsResponse> {
+    return useQuery({
+        queryKey: queryKeys.settings,
+        queryFn: ({ signal }) => fetchSettings(signal),
+        staleTime: 60_000,
     });
 }
 

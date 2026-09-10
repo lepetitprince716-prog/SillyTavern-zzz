@@ -108,8 +108,12 @@ test.describe('next frontend', () => {
                 'semanticEnabled: false, semanticThreshold: 0.3, semanticTopK: 3 } } }));',
         });
 
-        await page.goto('/next/characters');
-        await page.locator('nav[aria-label="Characters"] a').first().click();
+        // A named character rather than whichever is first in the list: the
+        // order is by last-chatted, so another spec's fixture chatting in
+        // between changes which card this test lands on — and a card whose
+        // greeting matches none of Eldoria's keys turns the assertion into a
+        // skip.
+        await page.goto('/next/chat/default_Seraphina.png');
         await expect(page.locator('textarea[aria-label="Message"]')).toBeVisible();
 
         const trace = page.locator('aside').filter({ hasText: /world info/i });
@@ -131,8 +135,12 @@ test.describe('next frontend', () => {
     });
 
     test('opens the command palette, settings and the side panel', async ({ page }) => {
-        await page.goto('/next/characters');
-        await page.locator('nav[aria-label="Characters"] a').first().click();
+        // A named character rather than whichever is first in the list: the
+        // order is by last-chatted, so another spec's fixture chatting in
+        // between changes which card this test lands on — and a card whose
+        // greeting matches none of Eldoria's keys turns the assertion into a
+        // skip.
+        await page.goto('/next/chat/default_Seraphina.png');
         await expect(page.locator('textarea[aria-label="Message"]')).toBeVisible();
 
         await page.keyboard.press('ControlOrMeta+k');

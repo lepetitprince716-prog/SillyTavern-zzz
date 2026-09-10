@@ -21,6 +21,10 @@ const PROXIED_PATHS = [
     '/user',
     '/login',
     '/favicon.ico',
+    // Extension manifests: `/api/extensions/discover` returns folder names
+    // only, and the manifests are served from the same static path as the
+    // extension's own files.
+    '/scripts',
 ];
 
 export default defineConfig({

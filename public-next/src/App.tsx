@@ -4,6 +4,7 @@ import { AppShell } from '@/components/AppShell';
 import { EmptyState } from '@/components/ui/primitives';
 import { CharacterLibrary } from '@/features/characters/CharacterLibrary';
 import { ChatView } from '@/features/chat/ChatView';
+import { ExtensionsPage } from '@/features/extensions/ExtensionsPage';
 import { GroupChatView } from '@/features/groups/GroupChatView';
 import { WorldInfoPage } from '@/features/worldinfo/WorldInfoPage';
 
@@ -38,6 +39,10 @@ export function App() {
                     <Route
                         path="/worldinfo"
                         element={<WorldInfoPage onOpenSettings={openSettings} />}
+                    />
+                    <Route
+                        path="/extensions"
+                        element={<ExtensionsPage onOpenSettings={openSettings} />}
                     />
                     <Route path="/chat/:avatar" element={<ChatView onOpenSettings={openSettings} />} />
                     <Route

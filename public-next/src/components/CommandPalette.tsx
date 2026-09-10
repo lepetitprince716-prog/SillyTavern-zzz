@@ -1,8 +1,10 @@
 import { Dialog as RadixDialog } from 'radix-ui';
 import {
     LayoutGrid,
+    Library,
     MessageSquarePlus,
     Moon,
+    Puzzle,
     Search,
     Settings2,
     Sun,
@@ -81,6 +83,26 @@ function PaletteBody({
                 group: 'Actions',
                 run: () => {
                     void navigate('/characters');
+                    close();
+                },
+            },
+            {
+                id: 'action:worldinfo',
+                label: 'Open lorebooks',
+                icon: <Library className="size-4" />,
+                group: 'Actions',
+                run: () => {
+                    void navigate('/worldinfo');
+                    close();
+                },
+            },
+            {
+                id: 'action:extensions',
+                label: 'Open extensions',
+                icon: <Puzzle className="size-4" />,
+                group: 'Actions',
+                run: () => {
+                    void navigate('/extensions');
                     close();
                 },
             },

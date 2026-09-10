@@ -1,4 +1,4 @@
-import { LayoutGrid, Library, Search, Star, Users, X } from 'lucide-react';
+import { LayoutGrid, Library, Puzzle, Search, Star, Users, X } from 'lucide-react';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { avatarUrl, characterTags } from '@/api/characters';
@@ -98,13 +98,16 @@ export function CharacterSidebar({ onNavigate }: { onNavigate?(): void }) {
                     ) : null}
                 </div>
 
-                <div className="flex items-center gap-1">
+                {/* Wraps rather than hyphenating: four labels do not always fit
+                    one line, and "Add-ons" split across two is worse than
+                    two tidy rows. */}
+                <div className="flex flex-wrap items-center gap-1">
                     <button
                         type="button"
                         onClick={() => setFavouritesOnly((value) => !value)}
                         aria-pressed={favouritesOnly}
                         className={cn(
-                            'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
+                            'inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
                             favouritesOnly
                                 ? 'bg-warning/15 text-warning'
                                 : 'text-subtle hover:bg-surface-2 hover:text-text',
@@ -118,7 +121,7 @@ export function CharacterSidebar({ onNavigate }: { onNavigate?(): void }) {
                         onClick={onNavigate}
                         className={({ isActive }) =>
                             cn(
-                                'ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
+                                'ml-auto inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
                                 isActive ? 'text-accent' : 'text-subtle hover:bg-surface-2 hover:text-text',
                             )
                         }
@@ -127,11 +130,24 @@ export function CharacterSidebar({ onNavigate }: { onNavigate?(): void }) {
                         Lore
                     </NavLink>
                     <NavLink
+                        to="/extensions"
+                        onClick={onNavigate}
+                        className={({ isActive }) =>
+                            cn(
+                                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
+                                isActive ? 'text-accent' : 'text-subtle hover:bg-surface-2 hover:text-text',
+                            )
+                        }
+                    >
+                        <Puzzle className="size-3" />
+                        Extensions
+                    </NavLink>
+                    <NavLink
                         to="/characters"
                         onClick={onNavigate}
                         className={({ isActive }) =>
                             cn(
-                                'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
+                                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
                                 isActive ? 'text-accent' : 'text-subtle hover:bg-surface-2 hover:text-text',
                             )
                         }

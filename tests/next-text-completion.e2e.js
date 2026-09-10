@@ -32,15 +32,39 @@ async function requestContaining(request, base, marker) {
 }
 
 /**
- * Opens a chat of this test's own, by navigating to an id nothing else uses.
+ * Opens an empty chat of this test's own.
  *
  * Clicking through the character list lands in whichever chat is *newest*,
  * which is server state shared by every worker: another spec creating a chat
  * between the click and the send steals the one this test is asserting on.
- * A chat file that does not exist yet is simply an empty chat.
+ *
+ * The id is derived from the test, so it is also the same id the *previous
+ * run* used — and a chat file is not deleted between runs. Truncating it first
+ * is what stops replies accumulating across runs until two of them match the
+ * same locator.
  */
-async function openChat(page, testInfo) {
+async function openChat(page, request, testInfo) {
     const chatId = `e2e-text-${testInfo.testId}`;
+    const token = await (await request.get('/csrf-token')).json();
+    const saved = await request.post('/api/chats/save', {
+        headers: { 'X-CSRF-Token': token.token },
+        data: {
+            ch_name: 'Seraphina',
+            file_name: chatId,
+            avatar_url: AVATAR,
+            force: true,
+            chat: [
+                {
+                    user_name: 'User',
+                    character_name: 'Seraphina',
+                    create_date: '2026-09-10@05h00m00s',
+                    chat_metadata: {},
+                },
+            ],
+        },
+    });
+    expect(saved.ok()).toBeTruthy();
+
     await page.goto(`/next/chat/${encodeURIComponent(AVATAR)}/${encodeURIComponent(chatId)}`);
     await expect(page.locator('textarea[aria-label="Message"]')).toBeVisible();
     return chatId;
@@ -82,7 +106,7 @@ test.describe('text completion', () => {
     });
 
     test('flattens the chat into one instruct-wrapped prompt', async ({ page, request }, testInfo) => {
-        await openChat(page, testInfo);
+        await openChat(page, request, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
 
         await page.locator('textarea[aria-label="Message"]').fill('Where are we going?');
@@ -117,7 +141,7 @@ test.describe('text completion', () => {
     });
 
     test('sends each backend only the parameter names it uses', async ({ page, request }, testInfo) => {
-        await openChat(page, testInfo);
+        await openChat(page, request, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
         await page.locator('textarea[aria-label="Message"]').fill('Marker one.');
         await page.keyboard.press('Enter');
@@ -151,8 +175,8 @@ test.describe('text completion', () => {
         expect(consoleErrors).toEqual([]);
     });
 
-    test('hides the samplers the chosen backend cannot use', async ({ page }, testInfo) => {
-        await openChat(page, testInfo);
+    test('hides the samplers the chosen backend cannot use', async ({ page, request }, testInfo) => {
+        await openChat(page, request, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
 
         await page.keyboard.press('Control+,');
@@ -177,8 +201,8 @@ test.describe('text completion', () => {
         await expect(page.getByRole('slider', { name: 'Temperature' })).toBeVisible();
     });
 
-    test('shows the flattened prompt in the inspector, not the message array', async ({ page }, testInfo) => {
-        await openChat(page, testInfo);
+    test('shows the flattened prompt in the inspector, not the message array', async ({ page, request }, testInfo) => {
+        await openChat(page, request, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
 
         // The inspector is the right-hand panel, toggled from the header.
@@ -191,8 +215,8 @@ test.describe('text completion', () => {
         await expect(dialog).toContainText(/\d+ stop strings/);
     });
 
-    test('names the backend in the chat header', async ({ page }, testInfo) => {
-        await openChat(page, testInfo);
+    test('names the backend in the chat header', async ({ page, request }, testInfo) => {
+        await openChat(page, request, testInfo);
         await useBackend(page, { backend: 'KoboldAI / KoboldCpp', url: KOBOLD_URL });
         // The provider list does not apply in text mode, so the header has to
         // name the backend and its server instead.
