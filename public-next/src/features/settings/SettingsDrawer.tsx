@@ -1,9 +1,8 @@
 import { Check, ExternalLink, KeyRound, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { personaAvatarUrl } from '@/api/characters';
 import { RESPONSES_API_SOURCES, SOURCES_WITH_MODEL_LIST, SUGGESTED_MODELS } from '@/api/generate';
-import { queryKeys, useModels, usePersonas, useSecretState, useVersion } from '@/api/queries';
+import { queryKeys, useModels, useSecretState, useVersion } from '@/api/queries';
 import { hasSecret, SECRET_KEY_BY_SOURCE, writeSecret } from '@/api/settings';
 import {
     CHAT_COMPLETION_SOURCES,
@@ -12,7 +11,6 @@ import {
     type ChatCompletionSource,
     type ReasoningEffort,
 } from '@/api/types';
-import { Avatar } from '@/components/ui/Avatar';
 import {
     SegmentedControl,
     Select,
@@ -24,11 +22,12 @@ import {
     ToggleRow,
 } from '@/components/ui/controls';
 import { Drawer } from '@/components/ui/overlays';
-import { Badge, Button, Field, Input, SectionLabel, Textarea } from '@/components/ui/primitives';
+import { Badge, Button, Field, Input, Textarea } from '@/components/ui/primitives';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 import { DEFAULT_SYSTEM_PROMPT, useSessionStore } from '@/store/session';
 import { applyAppearance, useUiStore } from '@/store/ui';
+import { PersonaManager } from './PersonaManager';
 
 const SOURCE_OPTIONS = Object.values(CHAT_COMPLETION_SOURCES).map((source) => ({
     value: source,
@@ -369,96 +368,6 @@ function PromptTab() {
     );
 }
 
-function PersonaTab() {
-    const personaAvatar = useSessionStore((state) => state.personaAvatar);
-    const userName = useSessionStore((state) => state.userName);
-    const personaDescription = useSessionStore((state) => state.personaDescription);
-    const setPersona = useSessionStore((state) => state.setPersona);
-    const { data, isPending } = usePersonas();
-
-    return (
-        <div className="space-y-5">
-            <Field label="Display name" hint="Substituted for {{user}} in prompts and greetings.">
-                <Input
-                    value={userName}
-                    onChange={(event) =>
-                        setPersona({
-                            avatar: personaAvatar,
-                            name: event.target.value,
-                            description: personaDescription,
-                        })
-                    }
-                />
-            </Field>
-
-            <Field label="Persona description" hint="Injected into the system block as who you are.">
-                <Textarea
-                    value={personaDescription}
-                    onChange={(event) =>
-                        setPersona({
-                            avatar: personaAvatar,
-                            name: userName,
-                            description: event.target.value,
-                        })
-                    }
-                    rows={4}
-                />
-            </Field>
-
-            <div className="space-y-2">
-                <SectionLabel className="px-0">Saved personas</SectionLabel>
-                {isPending ? (
-                    <p className="text-xs text-subtle">Loading…</p>
-                ) : (data?.personas.length ?? 0) === 0 ? (
-                    <p className="text-xs text-subtle">
-                        No personas found. Create one in the classic interface and it will show up here.
-                    </p>
-                ) : (
-                    <div className="space-y-1">
-                        {data?.personas.map((persona) => (
-                            <button
-                                key={persona.avatar}
-                                type="button"
-                                onClick={() =>
-                                    setPersona({
-                                        avatar: persona.avatar,
-                                        name: persona.name,
-                                        description: persona.description,
-                                    })
-                                }
-                                className={cn(
-                                    'flex w-full items-center gap-2.5 rounded-lg border p-2 text-left transition-colors',
-                                    persona.avatar === personaAvatar
-                                        ? 'border-accent bg-accent-soft'
-                                        : 'border-border hover:bg-surface-2',
-                                )}
-                            >
-                                <Avatar
-                                    src={personaAvatarUrl(persona.avatar)}
-                                    name={persona.name}
-                                    size="sm"
-                                    rounded="card"
-                                />
-                                <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-[0.8125rem] font-medium">
-                                        {persona.name}
-                                    </span>
-                                    {persona.description ? (
-                                        <span className="block truncate text-[0.6875rem] text-subtle">
-                                            {persona.description}
-                                        </span>
-                                    ) : null}
-                                </span>
-                                {persona.avatar === data?.defaultAvatar ? <Badge>default</Badge> : null}
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
-
 function AppearanceTab() {
     const ui = useUiStore();
 
@@ -606,7 +515,7 @@ export function SettingsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
                     <PromptTab />
                 </TabsContent>
                 <TabsContent value="persona">
-                    <PersonaTab />
+                    <PersonaManager />
                 </TabsContent>
                 <TabsContent value="appearance">
                     <AppearanceTab />

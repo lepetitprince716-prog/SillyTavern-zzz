@@ -81,7 +81,7 @@ export function CharacterSidebar({ onNavigate }: { onNavigate?(): void }) {
                             }
                         }}
                         placeholder="Search characters…"
-                        aria-label="Search characters"
+                        aria-label="Filter the character list"
                         className="h-9 pl-8 pr-8"
                     />
                     {query ? (

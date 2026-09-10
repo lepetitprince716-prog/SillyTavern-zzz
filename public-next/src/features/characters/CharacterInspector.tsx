@@ -1,10 +1,14 @@
+import { Pencil } from 'lucide-react';
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { cardField, characterTags, greetings } from '@/api/characters';
 import type { Character } from '@/api/types';
 import { Modal } from '@/components/ui/overlays';
 import { Badge, Button, SectionLabel } from '@/components/ui/primitives';
 import { compactNumber, estimateTokens } from '@/lib/format';
 import type { ChatSession } from '@/features/chat/useChatSession';
+import { CharacterActions } from './CharacterActions';
+import { CharacterEditor, FavouriteButton } from './CharacterEditor';
 
 function Detail({ label, value }: { label: string; value: string }) {
     if (!value.trim()) {
@@ -31,6 +35,8 @@ export function CharacterInspector({
     session: ChatSession;
 }) {
     const [promptOpen, setPromptOpen] = useState(false);
+    const [editorOpen, setEditorOpen] = useState(false);
+    const navigate = useNavigate();
     const tags = characterTags(character);
     const alternates = greetings(character);
 
@@ -40,7 +46,16 @@ export function CharacterInspector({
     return (
         <div className="space-y-5 p-5">
             <div className="space-y-2">
-                <h2 className="text-[0.9375rem] font-semibold">{character.name}</h2>
+                <div className="flex items-start gap-1">
+                    <h2 className="min-w-0 flex-1 text-[0.9375rem] font-semibold">{character.name}</h2>
+                    <FavouriteButton character={character} />
+                    <CharacterActions
+                        character={character}
+                        onEdit={() => setEditorOpen(true)}
+                        onDeleted={() => void navigate('/characters')}
+                        compact
+                    />
+                </div>
                 {character.data?.creator ? (
                     <p className="text-xs text-subtle">
                         by {character.data.creator}
@@ -57,6 +72,10 @@ export function CharacterInspector({
             </div>
 
             <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setEditorOpen(true)}>
+                    <Pencil className="size-3.5" />
+                    Edit card
+                </Button>
                 <Button size="sm" variant="secondary" onClick={() => setPromptOpen(true)}>
                     Inspect prompt
                 </Button>
@@ -123,6 +142,8 @@ export function CharacterInspector({
                     ) : null}
                 </div>
             </Modal>
+
+            <CharacterEditor open={editorOpen} onOpenChange={setEditorOpen} character={character} />
         </div>
     );
 }

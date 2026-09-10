@@ -112,7 +112,11 @@ async function request(
     const token = await getCsrfToken();
     const headers = new Headers(init.headers);
     headers.set('X-CSRF-Token', token);
-    if (init.body !== undefined && !headers.has('Content-Type')) {
+    // Only a serialised JSON body gets a JSON content type. FormData must be
+    // left without one so the browser adds it together with the multipart
+    // boundary; setting it here makes the server parse the body as JSON and
+    // reject the upload.
+    if (typeof init.body === 'string' && !headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json');
     }
 
@@ -172,4 +176,30 @@ export async function apiStream<TBody = unknown>(
     options?: RequestOptions,
 ): Promise<Response> {
     return request(path, { method: 'POST', body: JSON.stringify(body) }, options);
+}
+
+/**
+ * POSTs multipart form data — used for the upload endpoints.
+ *
+ * The Content-Type header is deliberately left unset: the browser has to add it
+ * along with the multipart boundary, and setting it by hand breaks the parse on
+ * the server.
+ */
+export async function apiPostForm<TResponse>(
+    path: string,
+    form: FormData,
+    options?: RequestOptions,
+): Promise<TResponse> {
+    const response = await request(path, { method: 'POST', body: form }, options);
+    return (await readBody(response)) as TResponse;
+}
+
+/** POSTs and returns the response body as a Blob, for file downloads. */
+export async function apiPostBlob<TBody = unknown>(
+    path: string,
+    body: TBody,
+    options?: RequestOptions,
+): Promise<Blob> {
+    const response = await request(path, { method: 'POST', body: JSON.stringify(body) }, options);
+    return await response.blob();
 }

@@ -63,6 +63,15 @@ in three long-lived chunks, plus 9 KB of CSS.
 
 - **Character library** — grid and sidebar, fuzzy search across name, tags,
   creator and description, sorting, favourites.
+- **Card editing** — create, edit, duplicate, rename, delete, favourite, and
+  swap avatars, across all V2 fields including alternate greetings, the system
+  prompt override, post-history instructions and the depth prompt. Import by
+  file picker or by dropping PNG / JSON / YAML / CHARX / BYAF onto the library;
+  export as PNG or JSON. Edits round-trip a card's `json_data`, so fields this
+  app does not model — third-party extension data included — survive a save.
+- **Personas** — create from an avatar image, edit, delete, and set a default.
+  Names and descriptions are written into the settings file the classic
+  interface owns, so both agree on who you are.
 - **Chat** — streaming replies, swipes (alternative generations), regenerate,
   inline editing, delete, delete-from-here-down, per-chat drafts.
 - **Prompt assembly** — card system prompt, description, personality, scenario,
@@ -120,7 +129,6 @@ The classic UI remains the place for these:
 - Group chats.
 - Text completion backends (KoboldAI, TextGen WebUI, NovelAI, Horde).
 - Extensions, quick replies, and slash commands.
-- Character and persona creation, import and editing.
 - Instruct-mode templates and context templates.
 
 Two interop notes: this app does not update a card's "current chat" pointer, so
@@ -161,6 +169,12 @@ expensive:
 - Prompt assembly — role mapping, swipe selection, card overrides, ordering.
 - Markdown sanitisation — script tags, event handlers, `javascript:` URLs.
 - Chat file parsing and the legacy timestamp format, which both interfaces read.
+- Card payload construction — the field mapping the server expects, and the
+  `json_data` round trip that stops a save from dropping data.
+- Persona settings patching, which rewrites a shared settings file and must
+  leave every key it does not own untouched.
+- Transport content-type negotiation: a JSON body gets a JSON content type and
+  FormData must not, or the multipart boundary is lost and uploads fail.
 
 `npm run test:unit --prefix tests` — the repo's own jest suite, which covers
 `convertResponsesApiMessages` alongside the other prompt converters.
