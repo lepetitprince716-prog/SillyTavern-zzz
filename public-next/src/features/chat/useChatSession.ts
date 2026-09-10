@@ -11,7 +11,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { greetings } from '@/api/characters';
 import { saveChat, type LoadedChat } from '@/api/chats';
-import { generateOnce, generateStream } from '@/api/generate';
 import { queryKeys, useChat } from '@/api/queries';
 import type {
     Character,
@@ -22,16 +21,13 @@ import type {
 } from '@/api/types';
 import { formatSendDate } from '@/lib/format';
 import { substituteMacros } from '@/lib/macros';
-import { splitReasoning } from '@/lib/markdown';
-import { streamCompletion } from '@/lib/sse';
 import { inlineImageFor } from '@/features/images/media';
 import { assembleTextPrompt } from '@/features/textcompletion/assemble';
-import { BACKENDS } from '@/features/textcompletion/backends';
-import { runTextCompletion } from '@/features/textcompletion/run';
 import { useTemplates } from '@/features/textcompletion/useTemplates';
 import { useSessionStore } from '@/store/session';
 import { toast } from '@/lib/toast';
 import { useWorldInfo, type WorldInfoState } from '@/features/worldinfo/useWorldInfo';
+import { useReplyGenerator } from './generate-turn';
 import { activeMessageText, buildPrompt } from './prompt';
 
 /** Text being streamed right now, before it becomes a real message. */
@@ -175,8 +171,10 @@ export function useChatSession(character: Character | null, fileName: string | n
     const chatQuery = useChat(avatar, fileName);
     const connection = useSessionStore((state) => state.connection);
     const textSettings = useSessionStore((state) => state.text);
+    const { generateReply, requireReady } = useReplyGenerator();
+    // Still needed for the prompt inspector, which renders the flattened
+    // prompt without generating anything.
     const { resolveInstruct, resolveContext } = useTemplates();
-    const sampling = useSessionStore((state) => state.sampling);
     const promptSettings = useSessionStore((state) => state.prompt);
     const userName = useSessionStore((state) => state.userName);
     const personaDescription = useSessionStore((state) => state.personaDescription);
@@ -300,18 +298,7 @@ export function useChatSession(character: Character | null, fileName: string | n
             if (!character) {
                 return;
             }
-            const isText = connection.mode === 'text';
-            const backend = BACKENDS[textSettings.backend];
-
-            if (!isText && !connection.model) {
-                toast.error('No model selected', 'Pick a model in Settings → Connection first.');
-                return;
-            }
-            if (isText && backend.needsUrl && !textSettings.url.trim()) {
-                toast.error(
-                    `No ${backend.label} server`,
-                    'Enter the server URL in Settings → Connection first.',
-                );
+            if (!requireReady()) {
                 return;
             }
 
@@ -320,103 +307,32 @@ export function useChatSession(character: Character | null, fileName: string | n
             setIsGenerating(true);
             setStreaming({ text: '', reasoning: '', isSwipe: mode === 'swipe' });
 
-            const request = {
-                source: connection.source,
-                messages: buildFor(history),
-                model: connection.model,
-                temperature: sampling.temperature,
-                maxTokens: sampling.maxTokens,
-                topP: sampling.topP,
-                frequencyPenalty: sampling.frequencyPenalty,
-                presencePenalty: sampling.presencePenalty,
-                stream: sampling.stream,
-                characterName: character.name,
-                userName,
-                useResponsesApi: connection.useResponsesApi,
-                reasoningEffort: sampling.reasoningEffort,
-                includeReasoning: sampling.includeReasoning,
-                signal: controller.signal,
-                ...(connection.customUrl ? { customUrl: connection.customUrl } : {}),
-            };
-
             let finalText = '';
             let finalReasoning = '';
 
             try {
-                if (isText) {
-                    // Text completion flattens the chat into one string, so it
-                    // needs its own prompt assembly rather than the message
-                    // array the chat-completion path builds.
-                    const { prompt, stop } = assembleTextPrompt({
-                        character,
-                        messages: history,
-                        userName,
-                        personaDescription,
-                        settings: promptSettings,
-                        instruct: resolveInstruct(textSettings.instructName),
-                        context: resolveContext(textSettings.contextName),
-                        instructEnabled: textSettings.instructEnabled,
-                        ...(worldInfo.result ? { worldInfo: worldInfo.result } : {}),
-                        ...(textSettings.customStops.length ? { customStops: textSettings.customStops } : {}),
-                    });
-
-                    const result = await runTextCompletion(
-                        {
-                            backend: textSettings.backend,
-                            prompt,
-                            stop,
-                            maxTokens: textSettings.maxTokens,
-                            maxContext: textSettings.maxContext,
-                            samplers: textSettings.samplers,
-                            stream: sampling.stream,
-                            url: textSettings.url,
-                            ...(textSettings.model ? { model: textSettings.model } : {}),
-                            ...(textSettings.hordeModels.length
-                                ? { hordeModels: textSettings.hordeModels }
-                                : {}),
-                        },
-                        {
-                            onProgress: (text, reasoning) => {
-                                const split = splitReasoning(text);
-                                setStreaming({
-                                    text: split.content,
-                                    reasoning: reasoning || split.reasoning,
-                                    isSwipe: mode === 'swipe',
-                                });
-                            },
-                            onQueued: (position, wait) => {
-                                setStreaming({
-                                    text: position > 0
-                                        ? `Queued on the Horde — position ${position}, about ${wait}s to wait.`
-                                        : 'Waiting for a Horde worker…',
-                                    reasoning: '',
-                                    isSwipe: mode === 'swipe',
-                                });
-                            },
-                        },
-                        controller.signal,
-                    );
-                    const split = splitReasoning(result.text);
-                    finalText = split.content;
-                    finalReasoning = result.reasoning || split.reasoning;
-                } else if (sampling.stream) {
-                    const response = await generateStream(request);
-                    for await (const chunk of streamCompletion(response, connection.source)) {
-                        const split = splitReasoning(chunk.text);
-                        finalText = split.content;
-                        finalReasoning = chunk.reasoning || split.reasoning;
-                        setStreaming({
-                            text: finalText,
-                            reasoning: finalReasoning,
-                            isSwipe: mode === 'swipe',
-                        });
-                    }
-                } else {
-                    const raw = await generateOnce(request);
-                    const split = splitReasoning(raw);
-                    finalText = split.content;
-                    finalReasoning = split.reasoning;
-                }
+                // The provider dispatch, prompt assembly and stream decoding
+                // live in `generate-turn.ts`, shared with group chats.
+                const reply = await generateReply({
+                    character,
+                    history,
+                    ...(worldInfo.result ? { worldInfo: worldInfo.result } : {}),
+                    onProgress: (text, reasoning) => setStreaming({
+                        text,
+                        reasoning,
+                        isSwipe: mode === 'swipe',
+                    }),
+                    onQueued: (position, wait) => setStreaming({
+                        text: position > 0
+                            ? `Queued on the Horde — position ${position}, about ${wait}s to wait.`
+                            : 'Waiting for a Horde worker…',
+                        reasoning: '',
+                        isSwipe: mode === 'swipe',
+                    }),
+                    signal: controller.signal,
+                });
+                finalText = reply.text;
+                finalReasoning = reply.reasoning;
             } catch (error) {
                 const aborted = controller.signal.aborted;
                 if (!aborted) {
@@ -480,20 +396,10 @@ export function useChatSession(character: Character | null, fileName: string | n
         },
         [
             character,
-            connection.customUrl,
-            connection.mode,
             connection.model,
-            connection.source,
-            connection.useResponsesApi,
-            sampling,
-            textSettings,
-            promptSettings,
-            personaDescription,
-            userName,
+            generateReply,
+            requireReady,
             worldInfo.result,
-            resolveInstruct,
-            resolveContext,
-            buildFor,
             setStreaming,
             writeMessages,
             scheduleSave,

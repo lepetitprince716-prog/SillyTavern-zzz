@@ -21,20 +21,49 @@ const AVATAR = 'default_Seraphina.png';
 /** 832×1216 — NovelAI's portrait default, and the shape most renders use. */
 const PORTRAIT_RATIO = 832 / 1216;
 
-/** Opens the newest chat of the first character. */
-async function openChat(page) {
-    await page.goto('/next/characters');
-    const characters = page.locator('nav[aria-label="Characters"] a');
-    await expect(characters.first()).toBeVisible();
-    await characters.first().click();
-    await expect(page.locator('textarea[aria-label="Message"]')).toBeVisible();
-}
+/**
+ * Opens a chat of this test's own, by navigating to an id nothing else uses.
+ *
+ * Clicking through the character list lands in whichever chat is *newest*,
+ * which is server state shared by every worker: another spec creating a chat
+ * between the click and the render steals the one this test is asserting on.
+ * A chat file that does not exist yet is simply an empty chat.
+ */
+async function freshChat(page, request, testInfo) {
+    const chatId = `e2e-images-${testInfo.testId}`;
 
-/** Starts a fresh chat so each test has its own message to illustrate. */
-async function freshChat(page) {
-    await openChat(page);
-    await page.getByRole('button', { name: 'New chat' }).click();
-    await expect(page.locator('article')).toHaveCount(1);
+    // Seeded with one message rather than left empty: an image is attached to
+    // a message, so an empty chat has nothing to illustrate.
+    const token = await (await request.get('/csrf-token')).json();
+    const response = await request.post('/api/chats/save', {
+        headers: { 'X-CSRF-Token': token.token },
+        data: {
+            ch_name: 'Seraphina',
+            file_name: chatId,
+            avatar_url: AVATAR,
+            force: true,
+            chat: [
+                {
+                    user_name: 'User',
+                    character_name: 'Seraphina',
+                    create_date: '2026-09-10@05h00m00s',
+                    chat_metadata: {},
+                },
+                {
+                    name: 'Seraphina',
+                    is_user: false,
+                    send_date: '2026-09-10 @05h 00m 00s 000ms',
+                    mes: 'She looks up as you arrive.',
+                },
+            ],
+        },
+    });
+    expect(response.ok()).toBeTruthy();
+
+    await page.goto(`/next/chat/${encodeURIComponent(AVATAR)}/${encodeURIComponent(chatId)}`);
+    await expect(page.locator('textarea[aria-label="Message"]')).toBeVisible();
+    await expect(page.locator('article').first()).toBeVisible();
+    return chatId;
 }
 
 /** Fills in the ComfyUI provider and prompt, then renders. */
@@ -48,8 +77,8 @@ async function render(page, prompt, { preset = 'Portrait 832×1216' } = {}) {
 }
 
 test.describe('image generation', () => {
-    test('reserves the box at the render\'s own shape before it loads', async ({ page }) => {
-        await freshChat(page);
+    test('reserves the box at the render\'s own shape before it loads', async ({ page, request }, testInfo) => {
+        await freshChat(page, request, testInfo);
         await page.getByRole('button', { name: 'Generate an image' }).click();
         await render(page, 'a fox girl with orange hair');
 
@@ -76,8 +105,8 @@ test.describe('image generation', () => {
         await expect(figure.locator('img')).toHaveCSS('image-rendering', 'auto');
     });
 
-    test('records the seed so a render can be reproduced', async ({ page }) => {
-        await freshChat(page);
+    test('records the seed so a render can be reproduced', async ({ page, request }, testInfo) => {
+        await freshChat(page, request, testInfo);
         await page.getByRole('button', { name: 'Generate an image' }).click();
         await render(page, 'a quiet forest clearing');
 
@@ -96,8 +125,8 @@ test.describe('image generation', () => {
         await expect(details.getByText('ComfyUI')).toBeVisible();
     });
 
-    test('zooms and pans in the lightbox', async ({ page }) => {
-        await freshChat(page);
+    test('zooms and pans in the lightbox', async ({ page, request }, testInfo) => {
+        await freshChat(page, request, testInfo);
         await page.getByRole('button', { name: 'Generate an image' }).click();
         await render(page, 'a stone bridge');
 
@@ -118,8 +147,8 @@ test.describe('image generation', () => {
         await expect(stage).toHaveAttribute('data-zoomed', 'false');
     });
 
-    test('switches a message to a gallery once it holds several renders', async ({ page }) => {
-        await freshChat(page);
+    test('switches a message to a gallery once it holds several renders', async ({ page, request }, testInfo) => {
+        await freshChat(page, request, testInfo);
         await page.getByRole('button', { name: 'Generate an image' }).click();
         await render(page, 'first render');
         await expect(page.locator('.media-figure img').first()).toBeVisible({ timeout: 30000 });
@@ -135,8 +164,8 @@ test.describe('image generation', () => {
         await expect(page.locator('.media-figure')).toHaveCount(1);
     });
 
-    test('moves the image and the text around each other', async ({ page }) => {
-        await freshChat(page);
+    test('moves the image and the text around each other', async ({ page, request }, testInfo) => {
+        await freshChat(page, request, testInfo);
         await page.getByRole('button', { name: 'Generate an image' }).click();
         await render(page, 'a lantern in the dark');
         await expect(page.locator('.media-figure img').first()).toBeVisible({ timeout: 30000 });
@@ -166,9 +195,8 @@ test.describe('image generation', () => {
         await expect(article.locator('.prose-message')).toHaveCount(1);
     });
 
-    test('persists the attachment in the shape the classic UI reads', async ({ page, request }) => {
-        await freshChat(page);
-        const chatFile = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+    test('persists the attachment in the shape the classic UI reads', async ({ page, request }, testInfo) => {
+        const chatFile = await freshChat(page, request, testInfo);
 
         await page.getByRole('button', { name: 'Generate an image' }).click();
         await render(page, 'a persisted render');

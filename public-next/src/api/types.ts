@@ -132,6 +132,14 @@ export interface ChatMessage {
     swipes?: string[];
     swipe_info?: Array<{ send_date?: string; gen_started?: string; gen_finished?: string; extra?: ChatMessageExtra } | null>;
     force_avatar?: string;
+    /**
+     * Avatar file of the character who said this, in a group chat.
+     *
+     * `name` is the display name, which can be shared or renamed;
+     * `original_avatar` is what identifies the speaker, and it is what the
+     * classic UI's group logic keys on.
+     */
+    original_avatar?: string;
     /** Present on the header line only — used to tell it apart from messages. */
     chat_metadata?: Record<string, unknown>;
     user_name?: string;

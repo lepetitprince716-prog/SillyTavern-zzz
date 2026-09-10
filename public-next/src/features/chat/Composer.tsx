@@ -34,8 +34,15 @@ export interface ComposerProps {
     onSend(text: string): void;
     onStop(): void;
     placeholder?: string;
-    /** Opens the image generation panel. Omitted when there is nothing to illustrate. */
+    /** Opens the image generation panel. */
     onIllustrate?(): void;
+    /**
+     * Why the image button cannot be used, if it cannot.
+     *
+     * Shown rather than hiding the button: a control that vanishes leaves the
+     * user with nothing to read and nothing to fix.
+     */
+    illustrateBlockedReason?: string;
 }
 
 export function Composer({
@@ -46,6 +53,7 @@ export function Composer({
     onStop,
     placeholder,
     onIllustrate,
+    illustrateBlockedReason,
 }: ComposerProps) {
     const [value, setValue] = useState(() => readDraft(chatId));
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -132,12 +140,12 @@ export function Composer({
                     />
 
                     {onIllustrate ? (
-                        <Tooltip content="Generate an image">
+                        <Tooltip content={illustrateBlockedReason ?? 'Generate an image'}>
                             <IconButton
                                 label="Generate an image"
                                 variant="ghost"
                                 onClick={onIllustrate}
-                                disabled={disabled}
+                                disabled={disabled || Boolean(illustrateBlockedReason)}
                             >
                                 <ImagePlus className="size-4" />
                             </IconButton>

@@ -17,6 +17,8 @@ import { test, expect } from '@playwright/test';
 const OOBA_URL = 'http://127.0.0.1:5100';
 const KOBOLD_URL = 'http://127.0.0.1:5101';
 
+const AVATAR = 'default_Seraphina.png';
+
 /**
  * The mock backend's most recent request whose prompt contains `marker`.
  *
@@ -29,19 +31,19 @@ async function requestContaining(request, base, marker) {
     return response.json();
 }
 
-async function openChat(page) {
-    await page.goto('/next/characters');
-    const characters = page.locator('nav[aria-label="Characters"] a');
-    await expect(characters.first()).toBeVisible();
-    await characters.first().click();
+/**
+ * Opens a chat of this test's own, by navigating to an id nothing else uses.
+ *
+ * Clicking through the character list lands in whichever chat is *newest*,
+ * which is server state shared by every worker: another spec creating a chat
+ * between the click and the send steals the one this test is asserting on.
+ * A chat file that does not exist yet is simply an empty chat.
+ */
+async function openChat(page, testInfo) {
+    const chatId = `e2e-text-${testInfo.testId}`;
+    await page.goto(`/next/chat/${encodeURIComponent(AVATAR)}/${encodeURIComponent(chatId)}`);
     await expect(page.locator('textarea[aria-label="Message"]')).toBeVisible();
-    await page.getByRole('button', { name: 'New chat' }).click();
-    // Waits for the greeting rather than asserting an exact message count:
-    // these specs run in parallel against one server, so another worker may
-    // have created a chat between the click and the assertion. The
-    // "fresh chat holds only the greeting" property is asserted in
-    // next-frontend.e2e.js, which owns it.
-    await expect(page.locator('article').first()).toBeVisible();
+    return chatId;
 }
 
 /** Puts the app into text-completion mode against the given backend. */
@@ -79,8 +81,8 @@ test.describe('text completion', () => {
         page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     });
 
-    test('flattens the chat into one instruct-wrapped prompt', async ({ page, request }) => {
-        await openChat(page);
+    test('flattens the chat into one instruct-wrapped prompt', async ({ page, request }, testInfo) => {
+        await openChat(page, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
 
         await page.locator('textarea[aria-label="Message"]').fill('Where are we going?');
@@ -114,8 +116,8 @@ test.describe('text completion', () => {
         expect(consoleErrors).toEqual([]);
     });
 
-    test('sends each backend only the parameter names it uses', async ({ page, request }) => {
-        await openChat(page);
+    test('sends each backend only the parameter names it uses', async ({ page, request }, testInfo) => {
+        await openChat(page, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
         await page.locator('textarea[aria-label="Message"]').fill('Marker one.');
         await page.keyboard.press('Enter');
@@ -149,8 +151,8 @@ test.describe('text completion', () => {
         expect(consoleErrors).toEqual([]);
     });
 
-    test('hides the samplers the chosen backend cannot use', async ({ page }) => {
-        await openChat(page);
+    test('hides the samplers the chosen backend cannot use', async ({ page }, testInfo) => {
+        await openChat(page, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
 
         await page.keyboard.press('Control+,');
@@ -175,8 +177,8 @@ test.describe('text completion', () => {
         await expect(page.getByRole('slider', { name: 'Temperature' })).toBeVisible();
     });
 
-    test('shows the flattened prompt in the inspector, not the message array', async ({ page }) => {
-        await openChat(page);
+    test('shows the flattened prompt in the inspector, not the message array', async ({ page }, testInfo) => {
+        await openChat(page, testInfo);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
 
         // The inspector is the right-hand panel, toggled from the header.
@@ -189,8 +191,8 @@ test.describe('text completion', () => {
         await expect(dialog).toContainText(/\d+ stop strings/);
     });
 
-    test('names the backend in the chat header', async ({ page }) => {
-        await openChat(page);
+    test('names the backend in the chat header', async ({ page }, testInfo) => {
+        await openChat(page, testInfo);
         await useBackend(page, { backend: 'KoboldAI / KoboldCpp', url: KOBOLD_URL });
         // The provider list does not apply in text mode, so the header has to
         // name the backend and its server instead.

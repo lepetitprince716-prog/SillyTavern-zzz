@@ -311,10 +311,15 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                     onStop={session.stop}
                     disabled={!fileFromRoute}
                     placeholder={`Message ${character.name}…`}
-                    onIllustrate={
-                        session.messages.length > 0 && !render.isGenerating
-                            ? () => setIllustrating(-1)
-                            : undefined
+                    onIllustrate={() => setIllustrating(-1)}
+                    illustrateBlockedReason={
+                        session.messages.length === 0
+                            // A render has to live on a message, so there has
+                            // to be one first.
+                            ? 'Send a message first — an image is attached to one.'
+                            : render.isGenerating
+                                ? 'A render is already in flight.'
+                                : undefined
                     }
                 />
 
