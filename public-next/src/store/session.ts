@@ -1,10 +1,24 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ImageProvider } from '@/api/images';
+import type { SamplerValues, TextBackend } from '@/features/textcompletion/backends';
+import { DEFAULT_SAMPLERS } from '@/features/textcompletion/backends';
 import type { ChatCompletionSource, MediaLayout, ReasoningEffort } from '@/api/types';
+
+/**
+ * Which family of API a generation goes through.
+ *
+ * `chat` sends a message array to a chat-completions endpoint; `text` flattens
+ * the chat into one string and sends it to a completions endpoint. They are
+ * different enough — different prompt shape, different samplers, different
+ * stop-string handling — that the UI treats them as separate modes rather than
+ * one provider list.
+ */
+export type ApiMode = 'chat' | 'text';
 
 /** Everything needed to talk to a provider, minus the API key. */
 export interface ConnectionSettings {
+    mode: ApiMode;
     source: ChatCompletionSource;
     model: string;
     /** Base URL for the `custom` source. */
@@ -53,6 +67,31 @@ export interface WorldInfoSettings {
     semanticThreshold: number;
     /** At most this many entries may activate on meaning alone. */
     semanticTopK: number;
+}
+
+/** Text completion settings. */
+export interface TextCompletionSettings {
+    backend: TextBackend;
+    /** Server URL, for the self-hosted backends. */
+    url: string;
+    model: string;
+    /** Response length. */
+    maxTokens: number;
+    /** Context window, which the backend uses to decide what to truncate. */
+    maxContext: number;
+    samplers: SamplerValues;
+    /**
+     * Wrap turns in the instruct template's sequences. Off sends plain
+     * `Name: text` dialogue, which suits a base model.
+     */
+    instructEnabled: boolean;
+    /** Selected template names, resolved against the files on the server. */
+    instructName: string;
+    contextName: string;
+    /** Stop strings the user added, on top of the templates'. */
+    customStops: string[];
+    /** Preferred Horde models. Empty means any. */
+    hordeModels: string[];
 }
 
 /** Image generation settings, remembered between renders. */
@@ -105,6 +144,7 @@ interface SessionState {
     sampling: SamplingSettings;
     prompt: PromptSettings;
     worldInfo: WorldInfoSettings;
+    text: TextCompletionSettings;
     image: ImageSettings;
 
     /** Avatar file name of the active persona, or null for the plain default. */
@@ -118,6 +158,7 @@ interface SessionState {
     setSampling(patch: Partial<SamplingSettings>): void;
     setPrompt(patch: Partial<PromptSettings>): void;
     setWorldInfo(patch: Partial<WorldInfoSettings>): void;
+    setText(patch: Partial<TextCompletionSettings>): void;
     setImage(patch: Partial<ImageSettings>): void;
     setPersona(persona: { avatar: string | null; name: string; description: string }): void;
 }
@@ -131,6 +172,7 @@ export const useSessionStore = create<SessionState>()(
     persist(
         (set) => ({
             connection: {
+                mode: 'chat',
                 source: 'openai',
                 model: '',
                 customUrl: '',
@@ -165,6 +207,20 @@ export const useSessionStore = create<SessionState>()(
                 // around 0.1. A higher floor would never fire.
                 semanticThreshold: 0.3,
                 semanticTopK: 3,
+            },
+
+            text: {
+                backend: 'ooba',
+                url: 'http://127.0.0.1:5000',
+                model: '',
+                maxTokens: 300,
+                maxContext: 4096,
+                samplers: { ...DEFAULT_SAMPLERS },
+                instructEnabled: true,
+                instructName: 'ChatML',
+                contextName: 'ChatML',
+                customStops: [],
+                hordeModels: [],
             },
 
             image: {
@@ -206,6 +262,7 @@ export const useSessionStore = create<SessionState>()(
             setSampling: (patch) => set((state) => ({ sampling: { ...state.sampling, ...patch } })),
             setPrompt: (patch) => set((state) => ({ prompt: { ...state.prompt, ...patch } })),
             setWorldInfo: (patch) => set((state) => ({ worldInfo: { ...state.worldInfo, ...patch } })),
+            setText: (patch) => set((state) => ({ text: { ...state.text, ...patch } })),
             setImage: (patch) => set((state) => ({ image: { ...state.image, ...patch } })),
             setPersona: (persona) =>
                 set({
@@ -234,6 +291,13 @@ export const useSessionStore = create<SessionState>()(
                     sampling: { ...current.sampling, ...saved.sampling },
                     prompt: { ...current.prompt, ...saved.prompt },
                     worldInfo: { ...current.worldInfo, ...saved.worldInfo },
+                    text: {
+                        ...current.text,
+                        ...saved.text,
+                        // A sampler added after the state was saved must keep
+                        // its default rather than becoming undefined.
+                        samplers: { ...current.text.samplers, ...saved.text?.samplers },
+                    },
                     image: {
                         ...current.image,
                         ...saved.image,

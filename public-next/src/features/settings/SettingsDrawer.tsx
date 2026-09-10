@@ -25,6 +25,8 @@ import { Drawer } from '@/components/ui/overlays';
 import { Badge, Button, Field, Input, Textarea } from '@/components/ui/primitives';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
+import { SamplerPanel } from '@/features/textcompletion/SamplerPanel';
+import { TextBackendPanel } from '@/features/textcompletion/TextBackendPanel';
 import { DEFAULT_SYSTEM_PROMPT, useSessionStore } from '@/store/session';
 import { applyAppearance, useUiStore } from '@/store/ui';
 import { PersonaManager } from './PersonaManager';
@@ -35,7 +37,39 @@ const SOURCE_OPTIONS = Object.values(CHAT_COMPLETION_SOURCES).map((source) => ({
     label: SOURCE_LABELS[source],
 }));
 
-function ConnectionTab() {
+/**
+ * Chat completions or text completions.
+ *
+ * The two are different enough — a message array against a single string,
+ * different samplers, different stop-string handling — that folding them into
+ * one provider list would mean a panel where half the controls silently do
+ * nothing depending on what is selected.
+ */
+function ApiModeSwitch() {
+    const mode = useSessionStore((state) => state.connection.mode);
+    const setConnection = useSessionStore((state) => state.setConnection);
+
+    return (
+        <div className="space-y-2">
+            <SegmentedControl
+                label="API type"
+                value={mode}
+                onValueChange={(next) => setConnection({ mode: next })}
+                options={[
+                    { value: 'chat', label: 'Chat completions' },
+                    { value: 'text', label: 'Text completions' },
+                ]}
+            />
+            <p className="text-[0.6875rem] leading-relaxed text-subtle">
+                {mode === 'chat'
+                    ? 'Sends the chat as a list of messages. What hosted providers expect.'
+                    : 'Flattens the chat into one prompt using an instruct template. What local servers and NovelAI expect.'}
+            </p>
+        </div>
+    );
+}
+
+function ChatConnectionPanel() {
     const connection = useSessionStore((state) => state.connection);
     const setConnection = useSessionStore((state) => state.setConnection);
     const queryClient = useQueryClient();
@@ -215,11 +249,36 @@ const REASONING_EFFORT_OPTIONS = REASONING_EFFORTS.map((effort) => ({
     label: effort === 'default' ? 'Model default' : effort,
 }));
 
+function ConnectionTab() {
+    const mode = useSessionStore((state) => state.connection.mode);
+
+    return (
+        <div className="space-y-5">
+            <ApiModeSwitch />
+            {mode === 'text' ? <TextBackendPanel /> : <ChatConnectionPanel />}
+        </div>
+    );
+}
+
 function GenerationTab() {
     const sampling = useSessionStore((state) => state.sampling);
     const setSampling = useSessionStore((state) => state.setSampling);
     const connection = useSessionStore((state) => state.connection);
     const onResponsesApi = connection.useResponsesApi && RESPONSES_API_SOURCES.has(connection.source);
+
+    if (connection.mode === 'text') {
+        return (
+            <div className="space-y-5">
+                <ToggleRow
+                    label="Stream responses"
+                    description="Show tokens as they arrive instead of waiting for the full reply. The Horde queues requests and cannot stream."
+                    checked={sampling.stream}
+                    onCheckedChange={(stream) => setSampling({ stream })}
+                />
+                <SamplerPanel />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-5">

@@ -11,6 +11,7 @@ import type { ImageRequest } from '@/api/images';
 import type { MediaAttachment, MediaLayout } from '@/api/types';
 import { CharacterInspector } from '@/features/characters/CharacterInspector';
 import { ImageGenerationDialog } from '@/features/images/ImageGenerationDialog';
+import { BACKENDS } from '@/features/textcompletion/backends';
 import { promptSuggestions } from '@/features/images/prompts';
 import { useImageGeneration } from '@/features/images/useImageGeneration';
 import { ChatHeader } from './ChatHeader';
@@ -45,6 +46,7 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
     const charactersQuery = useCharacters();
     const chatsQuery = useCharacterChats(avatar);
     const connection = useSessionStore((state) => state.connection);
+    const textSettings = useSessionStore((state) => state.text);
     const personaAvatar = useSessionStore((state) => state.personaAvatar);
     const inspectorOpen = useUiStore((state) => state.inspectorOpen);
 
@@ -186,9 +188,21 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
     const messagesKey = `messages:${chatKey}`;
     const composerKey = `composer:${chatKey}`;
 
-    const connectionLabel = connection.model
-        ? `${SOURCE_LABELS[connection.source]} · ${connection.model}`
-        : `${SOURCE_LABELS[connection.source]} · no model selected`;
+    // In text mode the provider list does not apply: the label has to name the
+    // backend and its server, which is what identifies the connection there.
+    const textBackend = BACKENDS[textSettings.backend];
+    const connectionLabel = connection.mode === 'text'
+        ? [
+            textBackend.label,
+            textSettings.model || (textBackend.needsUrl ? textSettings.url : ''),
+        ].filter(Boolean).join(' · ')
+        : connection.model
+            ? `${SOURCE_LABELS[connection.source]} · ${connection.model}`
+            : `${SOURCE_LABELS[connection.source]} · no model selected`;
+
+    const connected = connection.mode === 'text'
+        ? !textBackend.needsUrl || Boolean(textSettings.url.trim())
+        : Boolean(connection.model);
 
     return (
         <div className="flex min-h-0 flex-1">
@@ -205,7 +219,7 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                     onNewChat={startNewChat}
                     onOpenSettings={onOpenSettings}
                     connectionLabel={connectionLabel}
-                    connected={Boolean(connection.model)}
+                    connected={connected}
                 />
 
                 {session.isLoading ? (

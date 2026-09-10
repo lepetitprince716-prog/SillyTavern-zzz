@@ -25,6 +25,10 @@ import { substituteMacros } from '@/lib/macros';
 import { splitReasoning } from '@/lib/markdown';
 import { streamCompletion } from '@/lib/sse';
 import { inlineImageFor } from '@/features/images/media';
+import { assembleTextPrompt } from '@/features/textcompletion/assemble';
+import { BACKENDS } from '@/features/textcompletion/backends';
+import { runTextCompletion } from '@/features/textcompletion/run';
+import { useTemplates } from '@/features/textcompletion/useTemplates';
 import { useSessionStore } from '@/store/session';
 import { toast } from '@/lib/toast';
 import { useWorldInfo, type WorldInfoState } from '@/features/worldinfo/useWorldInfo';
@@ -47,6 +51,14 @@ export interface ChatSession {
     worldInfo: WorldInfoState;
     /** The prompt that would be sent right now, for the context inspector. */
     previewPrompt(): ReturnType<typeof buildPrompt>;
+    /**
+     * The flattened prompt and stop strings, for text-completion mode.
+     *
+     * Null in chat mode. Without this the inspector would show the message
+     * array in text mode — which is not what gets sent, and the whole point of
+     * an inspector is that it shows the real thing.
+     */
+    previewTextPrompt(): { prompt: string; stop: string[] } | null;
 
     send(text: string): void;
     regenerate(): void;
@@ -162,6 +174,8 @@ export function useChatSession(character: Character | null, fileName: string | n
     const avatar = character?.avatar ?? null;
     const chatQuery = useChat(avatar, fileName);
     const connection = useSessionStore((state) => state.connection);
+    const textSettings = useSessionStore((state) => state.text);
+    const { resolveInstruct, resolveContext } = useTemplates();
     const sampling = useSessionStore((state) => state.sampling);
     const promptSettings = useSessionStore((state) => state.prompt);
     const userName = useSessionStore((state) => state.userName);
@@ -286,8 +300,18 @@ export function useChatSession(character: Character | null, fileName: string | n
             if (!character) {
                 return;
             }
-            if (!connection.model) {
+            const isText = connection.mode === 'text';
+            const backend = BACKENDS[textSettings.backend];
+
+            if (!isText && !connection.model) {
                 toast.error('No model selected', 'Pick a model in Settings → Connection first.');
+                return;
+            }
+            if (isText && backend.needsUrl && !textSettings.url.trim()) {
+                toast.error(
+                    `No ${backend.label} server`,
+                    'Enter the server URL in Settings → Connection first.',
+                );
                 return;
             }
 
@@ -319,7 +343,63 @@ export function useChatSession(character: Character | null, fileName: string | n
             let finalReasoning = '';
 
             try {
-                if (sampling.stream) {
+                if (isText) {
+                    // Text completion flattens the chat into one string, so it
+                    // needs its own prompt assembly rather than the message
+                    // array the chat-completion path builds.
+                    const { prompt, stop } = assembleTextPrompt({
+                        character,
+                        messages: history,
+                        userName,
+                        personaDescription,
+                        settings: promptSettings,
+                        instruct: resolveInstruct(textSettings.instructName),
+                        context: resolveContext(textSettings.contextName),
+                        instructEnabled: textSettings.instructEnabled,
+                        ...(worldInfo.result ? { worldInfo: worldInfo.result } : {}),
+                        ...(textSettings.customStops.length ? { customStops: textSettings.customStops } : {}),
+                    });
+
+                    const result = await runTextCompletion(
+                        {
+                            backend: textSettings.backend,
+                            prompt,
+                            stop,
+                            maxTokens: textSettings.maxTokens,
+                            maxContext: textSettings.maxContext,
+                            samplers: textSettings.samplers,
+                            stream: sampling.stream,
+                            url: textSettings.url,
+                            ...(textSettings.model ? { model: textSettings.model } : {}),
+                            ...(textSettings.hordeModels.length
+                                ? { hordeModels: textSettings.hordeModels }
+                                : {}),
+                        },
+                        {
+                            onProgress: (text, reasoning) => {
+                                const split = splitReasoning(text);
+                                setStreaming({
+                                    text: split.content,
+                                    reasoning: reasoning || split.reasoning,
+                                    isSwipe: mode === 'swipe',
+                                });
+                            },
+                            onQueued: (position, wait) => {
+                                setStreaming({
+                                    text: position > 0
+                                        ? `Queued on the Horde — position ${position}, about ${wait}s to wait.`
+                                        : 'Waiting for a Horde worker…',
+                                    reasoning: '',
+                                    isSwipe: mode === 'swipe',
+                                });
+                            },
+                        },
+                        controller.signal,
+                    );
+                    const split = splitReasoning(result.text);
+                    finalText = split.content;
+                    finalReasoning = result.reasoning || split.reasoning;
+                } else if (sampling.stream) {
                     const response = await generateStream(request);
                     for await (const chunk of streamCompletion(response, connection.source)) {
                         const split = splitReasoning(chunk.text);
@@ -401,11 +481,18 @@ export function useChatSession(character: Character | null, fileName: string | n
         [
             character,
             connection.customUrl,
+            connection.mode,
             connection.model,
             connection.source,
             connection.useResponsesApi,
             sampling,
+            textSettings,
+            promptSettings,
+            personaDescription,
             userName,
+            worldInfo.result,
+            resolveInstruct,
+            resolveContext,
             buildFor,
             setStreaming,
             writeMessages,
@@ -658,6 +745,38 @@ export function useChatSession(character: Character | null, fileName: string | n
 
     const previewPrompt = useCallback(() => buildFor(messages), [buildFor, messages]);
 
+    const previewTextPrompt = useCallback(() => {
+        if (connection.mode !== 'text' || !character) {
+            return null;
+        }
+        return assembleTextPrompt({
+            character,
+            messages,
+            userName,
+            personaDescription,
+            settings: promptSettings,
+            instruct: resolveInstruct(textSettings.instructName),
+            context: resolveContext(textSettings.contextName),
+            instructEnabled: textSettings.instructEnabled,
+            ...(worldInfo.result ? { worldInfo: worldInfo.result } : {}),
+            ...(textSettings.customStops.length ? { customStops: textSettings.customStops } : {}),
+        });
+    }, [
+        character,
+        connection.mode,
+        messages,
+        personaDescription,
+        promptSettings,
+        resolveContext,
+        resolveInstruct,
+        textSettings.contextName,
+        textSettings.customStops,
+        textSettings.instructEnabled,
+        textSettings.instructName,
+        userName,
+        worldInfo.result,
+    ]);
+
     return {
         messages,
         isLoading: chatQuery.isPending && Boolean(avatar && fileName),
@@ -665,6 +784,7 @@ export function useChatSession(character: Character | null, fileName: string | n
         streaming: streamingValue,
         worldInfo,
         previewPrompt,
+        previewTextPrompt,
         send,
         regenerate,
         swipe,

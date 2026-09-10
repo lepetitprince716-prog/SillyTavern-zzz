@@ -107,13 +107,16 @@ export function Slider({
                 max={max}
                 step={step}
                 disabled={disabled}
-                aria-label={label}
                 className="relative flex h-5 w-full touch-none select-none items-center"
             >
                 <RadixSlider.Track className="relative h-1.5 w-full grow rounded-full bg-surface-3">
                     <RadixSlider.Range className="absolute h-full rounded-full bg-accent" />
                 </RadixSlider.Track>
                 <RadixSlider.Thumb
+                    // The name belongs on the thumb, which is the element
+                    // carrying `role="slider"` and the one that takes focus.
+                    // On the root it is announced by nothing.
+                    aria-label={label}
                     className={cn(
                         'block size-4 cursor-grab rounded-full border-2 border-accent bg-surface shadow-sm',
                         'transition-transform hover:scale-110 active:cursor-grabbing',

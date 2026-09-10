@@ -41,8 +41,12 @@ export function CharacterInspector({
     const tags = characterTags(character);
     const alternates = greetings(character);
 
-    const prompt = promptOpen ? session.previewPrompt() : [];
-    const promptTokens = prompt.reduce((total, message) => total + estimateTokens(message.content), 0);
+    // In text-completion mode the prompt is one string, not a message list.
+    const textPrompt = promptOpen ? session.previewTextPrompt() : null;
+    const prompt = promptOpen && !textPrompt ? session.previewPrompt() : [];
+    const promptTokens = textPrompt
+        ? estimateTokens(textPrompt.prompt)
+        : prompt.reduce((total, message) => total + estimateTokens(message.content), 0);
 
     return (
         <div className="space-y-5 p-5">
@@ -121,10 +125,46 @@ export function CharacterInspector({
                 open={promptOpen}
                 onOpenChange={setPromptOpen}
                 title="Prompt preview"
-                description={`${prompt.length} messages · roughly ${compactNumber(promptTokens)} tokens`}
+                description={textPrompt
+                    ? `One flattened prompt · roughly ${compactNumber(promptTokens)} tokens`
+                    : `${prompt.length} messages · roughly ${compactNumber(promptTokens)} tokens`}
                 size="lg"
             >
                 <div className="space-y-3">
+                    {textPrompt ? (
+                        <>
+                            <div className="overflow-hidden rounded-lg border border-border">
+                                <div className="flex items-center justify-between gap-2 bg-surface-2 px-3 py-1.5">
+                                    <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted">
+                                        prompt
+                                    </span>
+                                    <span className="text-[0.6875rem] tabular-nums text-subtle">
+                                        ~{compactNumber(promptTokens)} tok
+                                    </span>
+                                </div>
+                                <pre className="max-h-96 overflow-auto whitespace-pre-wrap px-3 py-2.5 font-mono text-[0.6875rem] leading-relaxed text-muted">
+                                    {textPrompt.prompt}
+                                </pre>
+                            </div>
+                            <div className="overflow-hidden rounded-lg border border-border">
+                                <div className="bg-surface-2 px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted">
+                                    {textPrompt.stop.length} stop strings
+                                </div>
+                                <ul className="max-h-40 space-y-1 overflow-auto px-3 py-2.5">
+                                    {textPrompt.stop.map((stop, index) => (
+                                        <li
+                                            key={index}
+                                            className="font-mono text-[0.6875rem] leading-relaxed text-muted"
+                                        >
+                                            {/* Newlines are significant in a stop string, so
+                                                they are shown rather than rendered. */}
+                                            {JSON.stringify(stop)}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </>
+                    ) : null}
                     {prompt.map((message, index) => (
                         <div key={index} className="overflow-hidden rounded-lg border border-border">
                             <div className="flex items-center justify-between gap-2 bg-surface-2 px-3 py-1.5">
@@ -140,7 +180,7 @@ export function CharacterInspector({
                             </pre>
                         </div>
                     ))}
-                    {prompt.length === 0 ? (
+                    {prompt.length === 0 && !textPrompt ? (
                         <p className="py-6 text-center text-sm text-subtle">
                             Nothing to send yet — pick a model and start the chat.
                         </p>
