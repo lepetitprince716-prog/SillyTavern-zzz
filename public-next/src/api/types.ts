@@ -50,6 +50,54 @@ export interface Character {
     json_data?: string;
 }
 
+/** Media kinds the chat file can carry. */
+export type MediaType = 'image' | 'video' | 'audio';
+
+/** Where a media attachment came from. Matches the classic UI's vocabulary. */
+export type MediaSource = 'api' | 'upload' | 'generated' | 'captioned';
+
+/**
+ * One entry of `extra.media`.
+ *
+ * `url`, `title`, `type` and `source` are what the classic UI reads. The rest
+ * is written by this frontend and ignored elsewhere: unknown keys survive the
+ * round-trip through the chat file untouched, so recording how a render was
+ * made costs nothing in compatibility.
+ */
+export interface MediaAttachment {
+    /** Server-relative path, e.g. `user/images/Seraphina/1757...png`. */
+    url: string;
+    /** Shown as a caption and as the image's accessible name. */
+    title?: string;
+    type: MediaType;
+    source?: MediaSource;
+    /** Pixel size, when known. Lets the layout reserve the right box. */
+    width?: number;
+    height?: number;
+    negative?: string;
+    /** Seed actually used, so the render can be reproduced. */
+    seed?: number;
+    provider?: string;
+    model?: string;
+    steps?: number;
+    cfgScale?: number;
+    sampler?: string;
+    scheduler?: string;
+    workflow?: string;
+    /** Wall-clock time the provider took, in milliseconds. */
+    durationMs?: number;
+}
+
+/**
+ * How a message lays its media out.
+ *
+ * The classic UI has one boolean, `inline_image`, which either shows the text
+ * with the image or replaces the text entirely. `media_layout` is the finer
+ * grained version; `inline_image` is kept in sync so the classic UI still does
+ * something sensible with the same message.
+ */
+export type MediaLayout = 'inline' | 'caption' | 'cover';
+
 /** Per-message metadata bag. Extensions write into this freely. */
 export interface ChatMessageExtra {
     token_count?: number;
@@ -59,6 +107,15 @@ export interface ChatMessageExtra {
     api?: string;
     bias?: string;
     isSmallSys?: boolean;
+    title?: string;
+    media?: MediaAttachment[];
+    /** `'list'` stacks every attachment; `'gallery'` shows one at a time. */
+    media_display?: 'list' | 'gallery';
+    /** Selected attachment in gallery display. */
+    media_index?: number;
+    /** Classic UI switch: false hides the message text. */
+    inline_image?: boolean;
+    media_layout?: MediaLayout;
     [key: string]: unknown;
 }
 

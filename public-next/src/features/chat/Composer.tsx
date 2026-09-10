@@ -1,4 +1,4 @@
-import { CornerDownLeft, Send, Square } from 'lucide-react';
+import { CornerDownLeft, ImagePlus, Send, Square } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { IconButton } from '@/components/ui/primitives';
 import { Tooltip } from '@/components/ui/overlays';
@@ -34,6 +34,8 @@ export interface ComposerProps {
     onSend(text: string): void;
     onStop(): void;
     placeholder?: string;
+    /** Opens the image generation panel. Omitted when there is nothing to illustrate. */
+    onIllustrate?(): void;
 }
 
 export function Composer({
@@ -43,6 +45,7 @@ export function Composer({
     onSend,
     onStop,
     placeholder,
+    onIllustrate,
 }: ComposerProps) {
     const [value, setValue] = useState(() => readDraft(chatId));
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -127,6 +130,19 @@ export function Composer({
                             'placeholder:text-subtle disabled:opacity-50',
                         )}
                     />
+
+                    {onIllustrate ? (
+                        <Tooltip content="Generate an image">
+                            <IconButton
+                                label="Generate an image"
+                                variant="ghost"
+                                onClick={onIllustrate}
+                                disabled={disabled}
+                            >
+                                <ImagePlus className="size-4" />
+                            </IconButton>
+                        </Tooltip>
+                    ) : null}
 
                     {isGenerating ? (
                         <Tooltip content="Stop generating">

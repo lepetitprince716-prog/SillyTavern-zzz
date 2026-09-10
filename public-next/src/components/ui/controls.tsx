@@ -46,15 +46,18 @@ export function ToggleRow({
     description,
     checked,
     onCheckedChange,
+    disabled,
 }: {
     label: string;
     description?: string;
     checked: boolean;
     onCheckedChange(checked: boolean): void;
+    /** Dimmed and unclickable — for a setting the current mode cannot use. */
+    disabled?: boolean;
 }) {
     const id = `toggle-${label.replace(/\s+/g, '-').toLowerCase()}`;
     return (
-        <div className="flex items-start justify-between gap-4 py-1">
+        <div className={cn('flex items-start justify-between gap-4 py-1', disabled && 'opacity-50')}>
             <div className="min-w-0">
                 <label htmlFor={id} className="block cursor-pointer text-[0.8125rem] font-medium">
                     {label}
@@ -63,7 +66,7 @@ export function ToggleRow({
                     <p className="mt-0.5 text-xs leading-relaxed text-subtle">{description}</p>
                 ) : null}
             </div>
-            <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+            <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
         </div>
     );
 }
@@ -76,6 +79,7 @@ export function Slider({
     step = 1,
     label,
     format,
+    disabled,
 }: {
     value: number;
     onValueChange(value: number): void;
@@ -85,9 +89,11 @@ export function Slider({
     label: string;
     /** Renders the current value; defaults to the raw number. */
     format?(value: number): string;
+    /** Dimmed and unclickable — for a setting the current mode cannot use. */
+    disabled?: boolean;
 }) {
     return (
-        <div className="space-y-2">
+        <div className={cn('space-y-2', disabled && 'opacity-50')}>
             <div className="flex items-baseline justify-between gap-2">
                 <span className="text-[0.8125rem] font-medium">{label}</span>
                 <span className="font-mono text-xs tabular-nums text-muted">
@@ -100,6 +106,7 @@ export function Slider({
                 min={min}
                 max={max}
                 step={step}
+                disabled={disabled}
                 aria-label={label}
                 className="relative flex h-5 w-full touch-none select-none items-center"
             >

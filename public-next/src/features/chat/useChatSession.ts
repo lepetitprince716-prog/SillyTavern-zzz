@@ -13,11 +13,18 @@ import { greetings } from '@/api/characters';
 import { saveChat, type LoadedChat } from '@/api/chats';
 import { generateOnce, generateStream } from '@/api/generate';
 import { queryKeys, useChat } from '@/api/queries';
-import type { Character, ChatMessage } from '@/api/types';
+import type {
+    Character,
+    ChatMessage,
+    ChatMessageExtra,
+    MediaAttachment,
+    MediaLayout,
+} from '@/api/types';
 import { formatSendDate } from '@/lib/format';
 import { substituteMacros } from '@/lib/macros';
 import { splitReasoning } from '@/lib/markdown';
 import { streamCompletion } from '@/lib/sse';
+import { inlineImageFor } from '@/features/images/media';
 import { useSessionStore } from '@/store/session';
 import { toast } from '@/lib/toast';
 import { useWorldInfo, type WorldInfoState } from '@/features/worldinfo/useWorldInfo';
@@ -49,6 +56,14 @@ export interface ChatSession {
     deleteMessage(index: number): void;
     /** Removes the message at `index` and everything after it. */
     truncateFrom(index: number): void;
+    /** Merges a patch into one message's `extra` bag. */
+    patchExtra(index: number, patch: Partial<ChatMessageExtra>): void;
+    /** Appends a rendered image to a message. */
+    addMedia(index: number, attachment: MediaAttachment, layout?: MediaLayout): void;
+    /** Removes one attachment from a message. */
+    removeMedia(index: number, attachmentIndex: number): void;
+    /** Records the pixel size of an attachment that did not carry one. */
+    measureMedia(index: number, attachmentIndex: number, size: { width: number; height: number }): void;
     /** Replaces the chat with the character's greeting. */
     reset(greetingIndex?: number): void;
 }
@@ -518,6 +533,107 @@ export function useChatSession(character: Character | null, fileName: string | n
         [scheduleSave, writeMessages],
     );
 
+    const patchExtra = useCallback(
+        (index: number, patch: Partial<ChatMessageExtra>) => {
+            writeMessages((current) => {
+                const target = current[index];
+                if (!target) {
+                    return current;
+                }
+                const copy = [...current];
+                copy[index] = { ...target, extra: { ...target.extra, ...patch } };
+                return copy;
+            });
+            scheduleSave();
+        },
+        [scheduleSave, writeMessages],
+    );
+
+    const addMedia = useCallback(
+        (index: number, attachment: MediaAttachment, layout: MediaLayout = 'inline') => {
+            writeMessages((current) => {
+                const target = current[index];
+                if (!target) {
+                    return current;
+                }
+                const existing = Array.isArray(target.extra?.media) ? target.extra.media : [];
+                const media = [...existing, attachment];
+                const copy = [...current];
+                copy[index] = {
+                    ...target,
+                    extra: {
+                        ...target.extra,
+                        media,
+                        media_layout: layout,
+                        // Kept in sync so the same message still reads correctly
+                        // in the classic UI, which only knows this boolean.
+                        inline_image: inlineImageFor(layout),
+                        // A second render is a variation of the first, so show
+                        // one at a time rather than stacking them.
+                        ...(media.length > 1
+                            ? { media_display: 'gallery' as const, media_index: media.length - 1 }
+                            : {}),
+                    },
+                };
+                return copy;
+            });
+            scheduleSave();
+        },
+        [scheduleSave, writeMessages],
+    );
+
+    const removeMedia = useCallback(
+        (index: number, attachmentIndex: number) => {
+            writeMessages((current) => {
+                const target = current[index];
+                const existing = target?.extra?.media;
+                if (!target || !Array.isArray(existing)) {
+                    return current;
+                }
+                const media = existing.filter((_, position) => position !== attachmentIndex);
+                const selected = Math.min(target.extra?.media_index ?? 0, Math.max(0, media.length - 1));
+                const copy = [...current];
+                copy[index] = {
+                    ...target,
+                    extra: {
+                        ...target.extra,
+                        media,
+                        media_index: selected,
+                        // Removing the last image must not leave the message
+                        // stuck with its text hidden behind a cover layout.
+                        ...(media.length === 0 ? { inline_image: true, media_layout: 'inline' as const } : {}),
+                    },
+                };
+                return copy;
+            });
+            scheduleSave();
+        },
+        [scheduleSave, writeMessages],
+    );
+
+    const measureMedia = useCallback(
+        (index: number, attachmentIndex: number, size: { width: number; height: number }) => {
+            writeMessages((current) => {
+                const target = current[index];
+                const existing = target?.extra?.media;
+                const attachment = existing?.[attachmentIndex];
+                // Only ever fills a gap: an attachment that already records a
+                // size is left alone, so this cannot loop with the img onLoad
+                // that reports it.
+                if (!target || !existing || !attachment || (attachment.width && attachment.height)) {
+                    return current;
+                }
+                const media = [...existing];
+                media[attachmentIndex] = { ...attachment, width: size.width, height: size.height };
+                const copy = [...current];
+                copy[index] = { ...target, extra: { ...target.extra, media } };
+                return copy;
+            });
+            scheduleSave();
+        },
+        [scheduleSave, writeMessages],
+    );
+
     const reset = useCallback(
         (greetingIndex = 0) => {
             if (!character) {
@@ -556,6 +672,10 @@ export function useChatSession(character: Character | null, fileName: string | n
         editMessage,
         deleteMessage,
         truncateFrom,
+        patchExtra,
+        addMedia,
+        removeMedia,
+        measureMedia,
         reset,
     };
 }

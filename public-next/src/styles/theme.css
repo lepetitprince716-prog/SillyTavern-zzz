@@ -434,3 +434,167 @@
 .pt-safe {
     padding-top: max(0px, env(safe-area-inset-top));
 }
+
+/* ==========================================================================
+   Message media — generated images and other attachments.
+
+   The classic renderer sizes every attachment with `max-height: 40vh` and
+   `image-rendering: -webkit-optimize-contrast`. The height cap squashes
+   portrait renders (see features/images/media.ts for why), and the rendering
+   hint is a legacy sharpening trick from the era of icon sprites: applied to a
+   downscaled diffusion render it exaggerates exactly the high-frequency noise
+   the model produced, so the image looks crunchy. Sizing lives in JS because
+   it depends on the attachment's own shape; what stays here is the framing.
+   ========================================================================== */
+
+.media-figure {
+    position: relative;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background-color: var(--surface-2);
+    /* Same stacking context as the hover controls inside it. */
+    isolation: isolate;
+}
+
+.media-frame {
+    display: block;
+    width: 100%;
+    /* `aspect-ratio` is set inline from the recorded pixel size, which reserves
+       the box before the bytes arrive: no reflow, no scroll jump, and nothing
+       to correct afterwards. */
+    background-color: var(--surface-3);
+}
+
+.media-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* Fills the reserved box exactly, so a slight mismatch between the
+       recorded size and the real file crops instead of stretching. */
+    object-fit: cover;
+    /* Deliberately the browser default: high-quality resampling is what a
+       photographic render wants. */
+    image-rendering: auto;
+    background-color: var(--surface-3);
+}
+
+/* A render whose size was never recorded cannot have its box reserved, so it
+   falls back to the plain flow and only the height budget applies. */
+.media-image--unsized {
+    height: auto;
+    object-fit: contain;
+}
+
+.media-image--failed {
+    /* Keep the frame; the overlay inside it says what happened. */
+    visibility: hidden;
+}
+
+/* A failed attachment that also recorded no pixel size has nothing to give
+   the frame any height, so the reason for the failure would be invisible. */
+.media-figure[data-failed='true'] {
+    min-height: 7rem;
+    min-width: min(100%, 12rem);
+}
+
+.media-grid {
+    display: grid;
+    gap: 0.5rem;
+    /* Frames must not stretch to the row height. A grid item defaults to
+       `align-self: stretch`, which makes its height definite and so overrides
+       the `aspect-ratio` the frame was sized with — leaving a landscape render
+       in a tall box with a band of empty frame beneath it. */
+    align-items: start;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+.media-grid[data-columns='2'] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.media-grid[data-columns='3'] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (width <= 32rem) {
+    /* Three-up inside a phone-width message column is a 60px thumbnail, which
+       tells the reader nothing. Two-up stays legible. */
+    .media-grid[data-columns='3'] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* The generation placeholder. Sized to the requested aspect ratio so the
+   finished image lands in the space its skeleton already occupied. */
+.media-pending {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    border-radius: 0.75rem;
+}
+
+/* Filmstrip thumbnails for gallery display. */
+.media-thumb {
+    position: relative;
+    flex: 0 0 auto;
+    width: 3.25rem;
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: 0.5rem;
+    border: 2px solid transparent;
+    background-color: var(--surface-3);
+    cursor: pointer;
+    transition: border-color 0.15s var(--ease-out-quint), opacity 0.15s;
+    opacity: 0.6;
+}
+
+.media-thumb:hover {
+    opacity: 1;
+}
+
+.media-thumb[aria-current='true'] {
+    border-color: var(--accent);
+    opacity: 1;
+}
+
+.media-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* ==========================================================================
+   Lightbox — full-size viewing with zoom and pan.
+   ========================================================================== */
+
+.lightbox-stage {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    /* The stage is the pan surface; the cursor tells the user so. */
+    touch-action: none;
+    background-color: color-mix(in oklab, var(--bg) 55%, black);
+}
+
+.lightbox-image {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    max-width: none;
+    /* `transform` is set inline from the zoom and pan state; compositing it
+       keeps a drag at animation frame rate on a large render. */
+    transform-origin: center;
+    will-change: transform;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.lightbox-stage[data-zoomed='true'] {
+    cursor: grab;
+}
+
+.lightbox-stage[data-dragging='true'] {
+    cursor: grabbing;
+}

@@ -1,7 +1,10 @@
 import { ArrowDown, ChevronUp } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { MediaAttachment } from '@/api/types';
 import { Button } from '@/components/ui/primitives';
 import { cn } from '@/lib/cn';
+import { inlineImageFor } from '@/features/images/media';
+import type { PendingRender } from '@/features/images/useImageGeneration';
 import type { ChatSession } from './useChatSession';
 import { MessageBubble } from './MessageBubble';
 
@@ -25,6 +28,13 @@ export interface MessageListProps {
     characterAvatar: string;
     personaAvatar: string | null;
     characterName: string;
+    /** Opens the generation panel seeded from a message. */
+    onIllustrate?(index: number): void;
+    onReuseSeed?(item: MediaAttachment): void;
+    /** The render currently in flight, and how long it has been running. */
+    pendingRender?: PendingRender | null;
+    renderElapsedMs?: number;
+    onCancelRender?(): void;
 }
 
 export function MessageList({
@@ -32,6 +42,11 @@ export function MessageList({
     characterAvatar,
     personaAvatar,
     characterName,
+    onIllustrate,
+    onReuseSeed,
+    pendingRender,
+    renderElapsedMs = 0,
+    onCancelRender,
 }: MessageListProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [windowSize, setWindowSize] = useState(INITIAL_WINDOW);
@@ -127,6 +142,32 @@ export function MessageList({
                                     onEdit={session.editMessage}
                                     onDelete={session.deleteMessage}
                                     onTruncate={session.truncateFrom}
+                                    onSelectMedia={(target, position) =>
+                                        session.patchExtra(target, { media_index: position })
+                                    }
+                                    onMediaDisplayChange={(target, display) =>
+                                        session.patchExtra(target, { media_display: display })
+                                    }
+                                    onRemoveMedia={session.removeMedia}
+                                    onMeasureMedia={session.measureMedia}
+                                    onSetMediaLayout={(target, layout) =>
+                                        session.patchExtra(target, {
+                                            media_layout: layout,
+                                            inline_image: inlineImageFor(layout),
+                                        })
+                                    }
+                                    {...(onIllustrate ? { onIllustrate } : {})}
+                                    {...(onReuseSeed ? { onReuseSeed } : {})}
+                                    {...(pendingRender?.messageIndex === index
+                                        ? {
+                                            pending: {
+                                                width: pendingRender.width,
+                                                height: pendingRender.height,
+                                                elapsedMs: renderElapsedMs,
+                                            },
+                                            ...(onCancelRender ? { onCancelRender } : {}),
+                                        }
+                                        : {})}
                                     {...(isLast && canSwipeLast ? { onRegenerate: session.regenerate } : {})}
                                     {...(isLast ? { onSwipe: session.swipe, canSwipe: canSwipeLast } : {})}
                                     {...streamProps}

@@ -1,5 +1,5 @@
 import { MessageSquareDashed } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { newChatFileName } from '@/api/chats';
 import { useCharacterChats, useCharacters } from '@/api/queries';
@@ -7,7 +7,12 @@ import { SOURCE_LABELS } from '@/api/types';
 import { EmptyState, Skeleton } from '@/components/ui/primitives';
 import { useSessionStore } from '@/store/session';
 import { useUiStore } from '@/store/ui';
+import type { ImageRequest } from '@/api/images';
+import type { MediaAttachment, MediaLayout } from '@/api/types';
 import { CharacterInspector } from '@/features/characters/CharacterInspector';
+import { ImageGenerationDialog } from '@/features/images/ImageGenerationDialog';
+import { promptSuggestions } from '@/features/images/prompts';
+import { useImageGeneration } from '@/features/images/useImageGeneration';
 import { ChatHeader } from './ChatHeader';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
@@ -76,6 +81,62 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
     const session = useChatSession(character, fileFromRoute);
     const { isLoading: chatLoading, reset: resetChat } = session;
     const messageCount = session.messages.length;
+
+    // Which message the generation panel is illustrating. `null` means closed;
+    // -1 means "a standalone render appended to the chat".
+    const [illustrating, setIllustrating] = useState<number | null>(null);
+    const setImage = useSessionStore((state) => state.setImage);
+    const { addMedia } = session;
+
+    const onRenderComplete = useCallback(
+        (messageIndex: number, attachment: MediaAttachment, layout: MediaLayout) => {
+            addMedia(messageIndex, attachment, layout);
+        },
+        [addMedia],
+    );
+
+    const render = useImageGeneration({
+        onComplete: onRenderComplete,
+        ...(character ? { characterName: character.name } : {}),
+    });
+
+    const suggestions = useMemo(
+        () => promptSuggestions(character, session.messages, illustrating ?? -1),
+        [character, session.messages, illustrating],
+    );
+
+    const initialPrompt = suggestions[0]?.prompt ?? '';
+
+    const startRender = (request: ImageRequest, layout: MediaLayout) => {
+        // A standalone render still needs a message to live on; the newest one
+        // is where the user was looking.
+        const target = illustrating !== null && illustrating >= 0
+            ? illustrating
+            : session.messages.length - 1;
+        if (target < 0) {
+            return;
+        }
+        render.start({ messageIndex: target, request, layout });
+    };
+
+    /** Re-opens the panel with the settings that produced an existing render. */
+    const reuseSettings = (item: MediaAttachment) => {
+        setImage({
+            ...(item.provider === 'novelai' || item.provider === 'comfyui'
+                ? { provider: item.provider }
+                : {}),
+            ...(item.negative !== undefined ? { negativePrompt: item.negative } : {}),
+            ...(item.width ? { width: item.width } : {}),
+            ...(item.height ? { height: item.height } : {}),
+            ...(typeof item.steps === 'number' ? { steps: item.steps } : {}),
+            ...(typeof item.cfgScale === 'number' ? { cfgScale: item.cfgScale } : {}),
+            ...(typeof item.seed === 'number' ? { seed: item.seed } : {}),
+            ...(item.sampler ? { sampler: item.sampler } : {}),
+            ...(item.scheduler ? { scheduler: item.scheduler } : {}),
+            ...(item.model ? { model: item.model } : {}),
+        });
+        setIllustrating((current) => current ?? session.messages.length - 1);
+    };
 
     // Seed a brand-new chat with the character's greeting. Depends on the
     // individual values rather than the session object, which is rebuilt on
@@ -156,6 +217,11 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                         characterAvatar={character.avatar}
                         personaAvatar={personaAvatar}
                         characterName={character.name}
+                        onIllustrate={setIllustrating}
+                        onReuseSeed={reuseSettings}
+                        pendingRender={render.pending}
+                        renderElapsedMs={render.elapsedMs}
+                        onCancelRender={render.cancel}
                     />
                 )}
 
@@ -167,6 +233,19 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                     onStop={session.stop}
                     disabled={!fileFromRoute}
                     placeholder={`Message ${character.name}…`}
+                    onIllustrate={
+                        session.messages.length > 0 && !render.isGenerating
+                            ? () => setIllustrating(-1)
+                            : undefined
+                    }
+                />
+
+                <ImageGenerationDialog
+                    open={illustrating !== null}
+                    onOpenChange={(open) => setIllustrating(open ? illustrating : null)}
+                    initialPrompt={initialPrompt}
+                    suggestions={suggestions}
+                    onSubmit={startRender}
                 />
             </div>
 

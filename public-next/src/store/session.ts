@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ChatCompletionSource, ReasoningEffort } from '@/api/types';
+import type { ImageProvider } from '@/api/images';
+import type { ChatCompletionSource, MediaLayout, ReasoningEffort } from '@/api/types';
 
 /** Everything needed to talk to a provider, minus the API key. */
 export interface ConnectionSettings {
@@ -54,6 +55,39 @@ export interface WorldInfoSettings {
     semanticTopK: number;
 }
 
+/** Image generation settings, remembered between renders. */
+export interface ImageSettings {
+    provider: ImageProvider;
+    negativePrompt: string;
+    width: number;
+    height: number;
+    steps: number;
+    cfgScale: number;
+    /** `-1` rolls a new seed per render. */
+    seed: number;
+    sampler: string;
+    scheduler: string;
+    model: string;
+    /** How a finished render sits in the message. */
+    layout: MediaLayout;
+    /** Stack every render in a message, or show one at a time. */
+    display: 'list' | 'gallery';
+    novelai: {
+        sm: boolean;
+        smDyn: boolean;
+        decrisper: boolean;
+        varietyBoost: boolean;
+        upscaleRatio: number;
+    };
+    comfyui: {
+        url: string;
+        auth: string;
+        workflow: string;
+        denoise: number;
+        clipSkip: number;
+    };
+}
+
 /** How the character and persona are turned into a system prompt. */
 export interface PromptSettings {
     /** Prepended before the character definition. */
@@ -71,6 +105,7 @@ interface SessionState {
     sampling: SamplingSettings;
     prompt: PromptSettings;
     worldInfo: WorldInfoSettings;
+    image: ImageSettings;
 
     /** Avatar file name of the active persona, or null for the plain default. */
     personaAvatar: string | null;
@@ -83,6 +118,7 @@ interface SessionState {
     setSampling(patch: Partial<SamplingSettings>): void;
     setPrompt(patch: Partial<PromptSettings>): void;
     setWorldInfo(patch: Partial<WorldInfoSettings>): void;
+    setImage(patch: Partial<ImageSettings>): void;
     setPersona(persona: { avatar: string | null; name: string; description: string }): void;
 }
 
@@ -131,6 +167,37 @@ export const useSessionStore = create<SessionState>()(
                 semanticTopK: 3,
             },
 
+            image: {
+                provider: 'novelai',
+                negativePrompt: '',
+                // NovelAI's own portrait default, and the shape most character
+                // renders want.
+                width: 832,
+                height: 1216,
+                steps: 28,
+                cfgScale: 5,
+                seed: -1,
+                sampler: '',
+                scheduler: '',
+                model: '',
+                layout: 'inline',
+                display: 'list',
+                novelai: {
+                    sm: false,
+                    smDyn: false,
+                    decrisper: false,
+                    varietyBoost: false,
+                    upscaleRatio: 0,
+                },
+                comfyui: {
+                    url: 'http://127.0.0.1:8188',
+                    auth: '',
+                    workflow: 'Default_Comfy_Workflow.json',
+                    denoise: 1,
+                    clipSkip: 1,
+                },
+            },
+
             personaAvatar: null,
             userName: 'User',
             personaDescription: '',
@@ -139,6 +206,7 @@ export const useSessionStore = create<SessionState>()(
             setSampling: (patch) => set((state) => ({ sampling: { ...state.sampling, ...patch } })),
             setPrompt: (patch) => set((state) => ({ prompt: { ...state.prompt, ...patch } })),
             setWorldInfo: (patch) => set((state) => ({ worldInfo: { ...state.worldInfo, ...patch } })),
+            setImage: (patch) => set((state) => ({ image: { ...state.image, ...patch } })),
             setPersona: (persona) =>
                 set({
                     personaAvatar: persona.avatar,
@@ -166,6 +234,12 @@ export const useSessionStore = create<SessionState>()(
                     sampling: { ...current.sampling, ...saved.sampling },
                     prompt: { ...current.prompt, ...saved.prompt },
                     worldInfo: { ...current.worldInfo, ...saved.worldInfo },
+                    image: {
+                        ...current.image,
+                        ...saved.image,
+                        novelai: { ...current.image.novelai, ...saved.image?.novelai },
+                        comfyui: { ...current.image.comfyui, ...saved.image?.comfyui },
+                    },
                 };
             },
         },

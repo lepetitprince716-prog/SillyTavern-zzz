@@ -4,6 +4,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Copy,
+    Image as ImageIcon,
     MoreHorizontal,
     Pencil,
     RefreshCw,
@@ -12,12 +13,13 @@ import {
 } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { avatarUrl, personaAvatarUrl } from '@/api/characters';
-import type { ChatMessage } from '@/api/types';
+import type { ChatMessage, MediaAttachment, MediaLayout } from '@/api/types';
 import { Avatar } from '@/components/ui/Avatar';
 import {
     Menu,
     MenuContent,
     MenuItem,
+    MenuLabel,
     MenuSeparator,
     MenuTrigger,
     Tooltip,
@@ -27,6 +29,14 @@ import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 import { absoluteTime, compactNumber, estimateTokens, relativeTime } from '@/lib/format';
 import { renderMessage } from '@/lib/markdown';
+import { MediaPending, MessageMedia } from '@/features/images/MessageMedia';
+import {
+    type MediaDisplay,
+    mediaDisplay,
+    mediaIndex,
+    mediaLayout,
+    messageMedia,
+} from '@/features/images/media';
 import { useUiStore } from '@/store/ui';
 
 export interface MessageBubbleProps {
@@ -46,7 +56,25 @@ export interface MessageBubbleProps {
     onRegenerate?(): void;
     onSwipe?(delta: 1 | -1): void;
     canSwipe?: boolean;
+    /** Opens the generation panel, seeded from this message. */
+    onIllustrate?(index: number): void;
+    onSelectMedia?(index: number, attachmentIndex: number): void;
+    onMediaDisplayChange?(index: number, display: MediaDisplay): void;
+    onRemoveMedia?(index: number, attachmentIndex: number): void;
+    onMeasureMedia?(index: number, attachmentIndex: number, size: { width: number; height: number }): void;
+    onSetMediaLayout?(index: number, layout: MediaLayout): void;
+    onReuseSeed?(item: MediaAttachment): void;
+    /** Render in flight for this message, if any. */
+    pending?: { width: number; height: number; elapsedMs: number };
+    onCancelRender?(): void;
 }
+
+/** Placement choices offered per message, mirroring the generation panel. */
+const LAYOUT_ITEMS: Array<{ value: MediaLayout; label: string }> = [
+    { value: 'inline', label: 'Below the text' },
+    { value: 'caption', label: 'As a caption' },
+    { value: 'cover', label: 'Image only' },
+];
 
 /** Collapsible chain-of-thought block. */
 function ReasoningBlock({ reasoning, streaming }: { reasoning: string; streaming: boolean }) {
@@ -147,6 +175,15 @@ function MessageBubbleImpl({
     onRegenerate,
     onSwipe,
     canSwipe,
+    onIllustrate,
+    onSelectMedia,
+    onMediaDisplayChange,
+    onRemoveMedia,
+    onMeasureMedia,
+    onSetMediaLayout,
+    onReuseSeed,
+    pending,
+    onCancelRender,
 }: MessageBubbleProps) {
     const [editing, setEditing] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -171,6 +208,17 @@ function MessageBubbleImpl({
     const html = useMemo(() => renderMessage(text ?? ''), [text]);
     const tokenCount = message.extra?.token_count ?? estimateTokens(text ?? '');
 
+    const media = useMemo(() => messageMedia(message), [message]);
+    const layout = mediaLayout(message.extra);
+    const display = mediaDisplay(message.extra);
+    const selectedMedia = mediaIndex(message.extra);
+    // `cover` hides the text behind a toggle rather than dropping it, which is
+    // what the classic UI's `inline_image: false` does — a message whose text
+    // is gone cannot be read, copied or edited.
+    const [textRevealed, setTextRevealed] = useState(false);
+    const hasMedia = media.length > 0;
+    const covered = hasMedia && layout === 'cover' && !textRevealed;
+
     const copy = async () => {
         try {
             await navigator.clipboard.writeText(text ?? '');
@@ -180,6 +228,42 @@ function MessageBubbleImpl({
             toast.error('Could not copy', 'The clipboard is unavailable in this context.');
         }
     };
+
+    const mediaBlock = (
+        <>
+            {hasMedia ? (
+                <MessageMedia
+                    items={media}
+                    display={display}
+                    selected={selectedMedia}
+                    {...(onSelectMedia
+                        ? { onSelect: (position: number) => onSelectMedia(index, position) }
+                        : {})}
+                    {...(onMediaDisplayChange
+                        ? { onDisplayChange: (next: MediaDisplay) => onMediaDisplayChange(index, next) }
+                        : {})}
+                    {...(onRemoveMedia
+                        ? { onRemove: (position: number) => onRemoveMedia(index, position) }
+                        : {})}
+                    {...(onMeasureMedia
+                        ? {
+                            onMeasure: (position: number, size: { width: number; height: number }) =>
+                                onMeasureMedia(index, position, size),
+                        }
+                        : {})}
+                    {...(onReuseSeed ? { onReuseSeed } : {})}
+                />
+            ) : null}
+            {pending ? (
+                <MediaPending
+                    width={pending.width}
+                    height={pending.height}
+                    elapsedMs={pending.elapsedMs}
+                    {...(onCancelRender ? { onCancel: onCancelRender } : {})}
+                />
+            ) : null}
+        </>
+    );
 
     return (
         <article
@@ -234,11 +318,34 @@ function MessageBubbleImpl({
                             onCancel={() => setEditing(false)}
                         />
                     ) : (
-                        <div
-                            className={cn('prose-message', isStreaming && 'streaming-caret')}
-                            // Sanitised by renderMessage() before it reaches here.
-                            dangerouslySetInnerHTML={{ __html: html }}
-                        />
+                        <>
+                            {/* `caption` puts the image first and the reply
+                                under it, which is the reading order when the
+                                picture is the point of the message. */}
+                            {layout !== 'inline' ? mediaBlock : null}
+
+                            {covered ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setTextRevealed(true)}
+                                    className="mt-2 text-xs text-muted underline underline-offset-2 transition-colors hover:text-text"
+                                >
+                                    Show the text
+                                </button>
+                            ) : (
+                                <div
+                                    className={cn(
+                                        'prose-message',
+                                        isStreaming && 'streaming-caret',
+                                        layout === 'caption' && hasMedia && 'mt-2 text-[0.9em] text-muted',
+                                    )}
+                                    // Sanitised by renderMessage() before it reaches here.
+                                    dangerouslySetInnerHTML={{ __html: html }}
+                                />
+                            )}
+
+                            {layout === 'inline' ? mediaBlock : null}
+                        </>
                     )}
 
                     {(isLast && !isUser && !isStreaming) || (swipeCount > 1 && isLast) ? (
@@ -306,11 +413,35 @@ function MessageBubbleImpl({
                                     <Pencil />
                                     Edit
                                 </MenuItem>
+                                {onIllustrate ? (
+                                    <MenuItem onSelect={() => onIllustrate(index)}>
+                                        <ImageIcon />
+                                        {hasMedia ? 'Render another image' : 'Illustrate this'}
+                                    </MenuItem>
+                                ) : null}
+                                {hasMedia && onSetMediaLayout ? (
+                                    <>
+                                        <MenuSeparator />
+                                        <MenuLabel>Image placement</MenuLabel>
+                                        {LAYOUT_ITEMS.map((item) => (
+                                            <MenuItem
+                                                key={item.value}
+                                                onSelect={() => {
+                                                    onSetMediaLayout(index, item.value);
+                                                    setTextRevealed(false);
+                                                }}
+                                            >
+                                                {layout === item.value ? <Check /> : <span className="size-4" />}
+                                                {item.label}
+                                            </MenuItem>
+                                        ))}
+                                    </>
+                                ) : null}
+                                <MenuSeparator />
                                 <MenuItem onSelect={() => onTruncate(index)}>
                                     <Scissors />
                                     Delete from here down
                                 </MenuItem>
-                                <MenuSeparator />
                                 <MenuItem tone="danger" onSelect={() => onDelete(index)}>
                                     <Trash2 />
                                     Delete message
