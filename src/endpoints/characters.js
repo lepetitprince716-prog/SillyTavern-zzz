@@ -584,11 +584,23 @@ function charaFormatData(data, directories) {
     _.set(char, 'first_mes', data.first_mes || '');
     _.set(char, 'mes_example', data.mes_example || '');
 
+    // `|| 0.5` discarded a deliberate zero: talkativeness 0 means "only speaks
+    // when named", which is the low end of the slider the UI offers, and a
+    // JSON body carries it as the number 0. An absent or empty value still
+    // falls back to the default.
+    const talkativenessGiven = data.talkativeness !== undefined
+        && data.talkativeness !== null
+        && data.talkativeness !== '';
+    const talkativenessNumber = talkativenessGiven ? Number(data.talkativeness) : Number.NaN;
+    const talkativeness = Number.isFinite(talkativenessNumber)
+        ? Math.min(1, Math.max(0, talkativenessNumber))
+        : 0.5;
+
     // Old ST extension fields (for backward compatibility, will be deprecated)
     _.set(char, 'creatorcomment', data.creator_notes || '');
     _.set(char, 'avatar', 'none');
     _.set(char, 'chat', data.ch_name + ' - ' + humanizedDateTime());
-    _.set(char, 'talkativeness', data.talkativeness || 0.5);
+    _.set(char, 'talkativeness', talkativeness);
     _.set(char, 'fav', data.fav == 'true');
     _.set(char, 'tags', typeof data.tags == 'string' ? (data.tags.split(',').map(x => x.trim()).filter(x => x)) : data.tags || []);
 
@@ -612,7 +624,7 @@ function charaFormatData(data, directories) {
     _.set(char, 'data.alternate_greetings', getAlternateGreetings(data));
 
     // ST extension fields to V2 object
-    _.set(char, 'data.extensions.talkativeness', data.talkativeness || 0.5);
+    _.set(char, 'data.extensions.talkativeness', talkativeness);
     _.set(char, 'data.extensions.fav', data.fav == 'true');
     _.set(char, 'data.extensions.world', data.world || '');
 

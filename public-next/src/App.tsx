@@ -4,6 +4,7 @@ import { AppShell } from '@/components/AppShell';
 import { EmptyState } from '@/components/ui/primitives';
 import { CharacterLibrary } from '@/features/characters/CharacterLibrary';
 import { ChatView } from '@/features/chat/ChatView';
+import { GroupChatView } from '@/features/groups/GroupChatView';
 import { WorldInfoPage } from '@/features/worldinfo/WorldInfoPage';
 
 function NotFound() {
@@ -42,6 +43,10 @@ export function App() {
                     <Route
                         path="/chat/:avatar/:file"
                         element={<ChatView onOpenSettings={openSettings} />}
+                    />
+                    <Route
+                        path="/group/:id"
+                        element={<GroupChatView onOpenSettings={openSettings} />}
                     />
                     <Route path="*" element={<NotFound />} />
                 </Routes>

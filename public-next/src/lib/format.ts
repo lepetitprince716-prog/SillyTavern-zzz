@@ -45,8 +45,15 @@ const DIVISIONS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
     ['year', Number.POSITIVE_INFINITY],
 ];
 
-/** `3 minutes ago`, `last week`, … from a timestamp or ST date string. */
-export function relativeTime(value: string | number | Date | undefined): string {
+/**
+ * `3 minutes ago`, `last week`, … from a timestamp or ST date string.
+ * @param reference The instant to measure against. Pass a shared clock (see
+ * `useNow`) where several of these are shown together, so they agree.
+ */
+export function relativeTime(
+    value: string | number | Date | undefined,
+    reference: number = Date.now(),
+): string {
     const date =
         value instanceof Date
             ? value
@@ -57,7 +64,16 @@ export function relativeTime(value: string | number | Date | undefined): string 
         return '';
     }
 
-    let duration = (date.getTime() - Date.now()) / 1000;
+    let duration = (date.getTime() - reference) / 1000;
+
+    // Everything inside a minute reads the same. Two reasons: a shared
+    // reference is necessarily a coarse one, and second-level precision here
+    // only ever made neighbouring messages disagree — including reading as the
+    // future when the reference was rounded down past them.
+    if (Math.abs(duration) < 60) {
+        return RELATIVE.format(0, 'second');
+    }
+
     for (const [unit, size] of DIVISIONS) {
         if (Math.abs(duration) < size) {
             return RELATIVE.format(Math.round(duration), unit);
@@ -65,6 +81,17 @@ export function relativeTime(value: string | number | Date | undefined): string 
         duration /= size;
     }
     return '';
+}
+
+/** ISO 8601 for a `<time datetime>` attribute, or `undefined` if unparseable. */
+export function isoTime(value: string | number | Date | undefined): string | undefined {
+    const date =
+        value instanceof Date
+            ? value
+            : typeof value === 'number'
+                ? new Date(value)
+                : parseSendDate(value);
+    return date ? date.toISOString() : undefined;
 }
 
 /** Absolute time for tooltips. */

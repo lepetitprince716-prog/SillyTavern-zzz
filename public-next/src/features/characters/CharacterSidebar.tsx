@@ -9,6 +9,7 @@ import { EmptyState, IconButton, Input, SectionLabel, Skeleton } from '@/compone
 import { cn } from '@/lib/cn';
 import { relativeTime } from '@/lib/format';
 import { fuzzyFilter } from '@/lib/search';
+import { GroupRows } from '@/features/groups/GroupList';
 import { isFavourite } from './utils';
 
 function CharacterRow({ character, onNavigate }: { character: Character; onNavigate?(): void }) {
@@ -142,6 +143,10 @@ export function CharacterSidebar({ onNavigate }: { onNavigate?(): void }) {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+                {/* Groups first: there are far fewer of them, and a group is
+                    the thing you are least likely to find by scrolling. */}
+                <GroupRows query={deferredQuery} {...(onNavigate ? { onNavigate } : {})} />
+
                 <SectionLabel className="px-2.5 py-1.5">
                     {isPending ? 'Loading' : `${results.length} character${results.length === 1 ? '' : 's'}`}
                 </SectionLabel>

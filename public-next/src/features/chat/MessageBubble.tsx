@@ -27,8 +27,9 @@ import {
 import { Badge, Button, IconButton, Textarea } from '@/components/ui/primitives';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
-import { absoluteTime, compactNumber, estimateTokens, relativeTime } from '@/lib/format';
+import { absoluteTime, compactNumber, estimateTokens, isoTime, relativeTime } from '@/lib/format';
 import { renderMessage } from '@/lib/markdown';
+import { useNow } from '@/lib/useNow';
 import { MediaPending, MessageMedia } from '@/features/images/MessageMedia';
 import {
     type MediaDisplay,
@@ -161,6 +162,27 @@ function MessageEditor({
     );
 }
 
+/**
+ * The relative timestamp, on its own so the 15-second tick re-renders a `<time>`
+ * rather than a whole bubble — and so nothing subscribes at all when the
+ * timestamps are switched off.
+ *
+ * It reads the shared clock instead of `Date.now()` because a list of these has
+ * to agree with itself: computed per render, an older message that happened to
+ * re-render later shows a *larger* age than a newer one above it, which reads
+ * as the history being out of order.
+ */
+function MessageTime({ sendDate }: { sendDate: string }) {
+    const now = useNow();
+    return (
+        <Tooltip content={absoluteTime(sendDate)}>
+            <time className="text-[0.6875rem] text-subtle" dateTime={isoTime(sendDate)}>
+                {relativeTime(sendDate, now)}
+            </time>
+        </Tooltip>
+    );
+}
+
 function MessageBubbleImpl({
     message,
     index,
@@ -290,11 +312,7 @@ function MessageBubbleImpl({
                     <header className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="text-[0.8125rem] font-semibold">{message.name}</span>
                         {showTimestamps && message.send_date ? (
-                            <Tooltip content={absoluteTime(message.send_date)}>
-                                <time className="text-[0.6875rem] text-subtle">
-                                    {relativeTime(message.send_date)}
-                                </time>
-                            </Tooltip>
+                            <MessageTime sendDate={message.send_date} />
                         ) : null}
                         {showTokenCounts ? (
                             <Badge className="text-[0.625rem]">{compactNumber(tokenCount)} tok</Badge>

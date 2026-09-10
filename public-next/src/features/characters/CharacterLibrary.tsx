@@ -11,6 +11,7 @@ import { cn } from '@/lib/cn';
 import { relativeTime } from '@/lib/format';
 import { fuzzyFilter } from '@/lib/search';
 import { useUiStore } from '@/store/ui';
+import { GroupCreateButton } from '@/features/groups/GroupList';
 import { CharacterActions } from './CharacterActions';
 import { CharacterEditor, FavouriteButton } from './CharacterEditor';
 import { useCharacterMutations } from './useCharacterMutations';
@@ -184,6 +185,7 @@ export function CharacterLibrary({ onOpenSettings }: { onOpenSettings(): void })
                     </div>
 
                     <div className="flex w-full items-center gap-2 sm:w-auto">
+                        <GroupCreateButton />
                         <div className="relative flex-1 sm:w-56">
                             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
                             <Input
