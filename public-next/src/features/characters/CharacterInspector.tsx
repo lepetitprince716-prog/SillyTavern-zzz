@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/overlays';
 import { Badge, Button, SectionLabel } from '@/components/ui/primitives';
 import { compactNumber, estimateTokens } from '@/lib/format';
 import type { ChatSession } from '@/features/chat/useChatSession';
+import { ActivationTrace } from '@/features/worldinfo/ActivationTrace';
 import { CharacterActions } from './CharacterActions';
 import { CharacterEditor, FavouriteButton } from './CharacterEditor';
 
@@ -106,6 +107,10 @@ export function CharacterInspector({
                     </div>
                 </section>
             ) : null}
+
+            <div className="border-t border-border pt-4">
+                <ActivationTrace state={session.worldInfo} />
+            </div>
 
             <Detail label="Description" value={cardField(character, 'description')} />
             <Detail label="Personality" value={cardField(character, 'personality')} />

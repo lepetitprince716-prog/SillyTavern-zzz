@@ -6,8 +6,10 @@ LLM Frontend for Power Users
 
 This fork ships a second, ground-up frontend built with React 19, TypeScript,
 Vite and Tailwind CSS v4. It runs alongside the classic interface and shares the
-same characters and chat files, and adds opt-in support for the OpenAI Responses
-API (`/v1/responses`).
+same characters and chat files. It adds opt-in support for the OpenAI Responses
+API (`/v1/responses`) and a rebuilt world info engine that explains every
+activation, ranks the token budget by relevance, and can match lore by meaning
+as well as by keyword.
 
 ```bash
 npm run next:install

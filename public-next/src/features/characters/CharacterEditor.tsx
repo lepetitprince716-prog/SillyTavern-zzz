@@ -1,10 +1,11 @@
-import { ImageUp, Plus, Star, Trash2, X } from 'lucide-react';
+import { ImageUp, Plus, Star, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { avatarUrl } from '@/api/characters';
 import { characterToDraft, EMPTY_DRAFT, type CharacterDraft, type DepthPromptRole } from '@/api/character-edit';
 import { useCharacters } from '@/api/queries';
 import type { Character } from '@/api/types';
 import { Avatar } from '@/components/ui/Avatar';
+import { ChipInput } from '@/components/ui/ChipInput';
 import { Select, Slider, Tabs, TabsContent, TabsList, TabsTrigger, ToggleRow } from '@/components/ui/controls';
 import { Modal } from '@/components/ui/overlays';
 import { Badge, Button, Field, IconButton, Input, SectionLabel, Textarea } from '@/components/ui/primitives';
@@ -15,90 +16,6 @@ import { useCharacterMutations } from './useCharacterMutations';
 
 /** Largest avatar we will hand to the server, which re-encodes it anyway. */
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
-
-/** Chip-style editor for a list of tags. */
-function TagInput({
-    tags,
-    onChange,
-    suggestions,
-}: {
-    tags: string[];
-    onChange(tags: string[]): void;
-    suggestions: string[];
-}) {
-    const [entry, setEntry] = useState('');
-
-    const add = (raw: string) => {
-        // Accept comma-separated paste as several tags.
-        const next = raw
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter((tag) => tag && !tags.includes(tag));
-        if (next.length > 0) {
-            onChange([...tags, ...next]);
-        }
-        setEntry('');
-    };
-
-    const unused = suggestions.filter((tag) => !tags.includes(tag)).slice(0, 8);
-
-    return (
-        <div className="space-y-2">
-            {tags.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                    {tags.map((tag) => (
-                        <span
-                            key={tag}
-                            className="inline-flex items-center gap-1 rounded-full bg-surface-3 py-0.5 pl-2.5 pr-1 text-xs"
-                        >
-                            {tag}
-                            <button
-                                type="button"
-                                onClick={() => onChange(tags.filter((item) => item !== tag))}
-                                aria-label={`Remove tag ${tag}`}
-                                className="rounded-full p-0.5 text-subtle transition-colors hover:text-danger"
-                            >
-                                <X className="size-3" />
-                            </button>
-                        </span>
-                    ))}
-                </div>
-            ) : null}
-
-            <Input
-                value={entry}
-                onChange={(event) => setEntry(event.target.value)}
-                onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ',') {
-                        event.preventDefault();
-                        add(entry);
-                    }
-                    if (event.key === 'Backspace' && !entry && tags.length > 0) {
-                        onChange(tags.slice(0, -1));
-                    }
-                }}
-                onBlur={() => add(entry)}
-                placeholder="Add a tag and press Enter"
-                aria-label="Add a tag"
-            />
-
-            {unused.length > 0 ? (
-                <div className="flex flex-wrap gap-1">
-                    {unused.map((tag) => (
-                        <button
-                            key={tag}
-                            type="button"
-                            onClick={() => onChange([...tags, tag])}
-                            className="rounded-full border border-border px-2 py-0.5 text-[0.6875rem] text-subtle transition-colors hover:border-accent hover:text-accent"
-                        >
-                            + {tag}
-                        </button>
-                    ))}
-                </div>
-            ) : null}
-        </div>
-    );
-}
 
 /** A textarea with a live token estimate, for the long card fields. */
 function CardField({
@@ -328,9 +245,11 @@ function CharacterEditorDialog({ open, onOpenChange, character, onCreated }: Cha
                         </div>
 
                         <Field label="Tags" hint="Used by search and filtering. Not sent to the model.">
-                            <TagInput
-                                tags={draft.tags}
+                            <ChipInput
+                                values={draft.tags}
                                 onChange={(tags) => patch({ tags })}
+                                label="Add a tag"
+                                placeholder="Add a tag and press Enter"
                                 suggestions={tagSuggestions}
                             />
                         </Field>

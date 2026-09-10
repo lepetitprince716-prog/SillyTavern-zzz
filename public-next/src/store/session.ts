@@ -29,6 +29,31 @@ export interface SamplingSettings {
     includeReasoning: boolean;
 }
 
+/** Which lorebooks are active and how the engine runs. */
+export interface WorldInfoSettings {
+    /** Master switch. */
+    enabled: boolean;
+    /** Book names selected in addition to the one bound to the character card. */
+    books: string[];
+    /** Also use the book named in the character's card, when it has one. */
+    useCharacterBook: boolean;
+    /** Tokens world info may spend. */
+    budgetTokens: number;
+    /** Recent messages scanned for keys. */
+    scanDepth: number;
+    /** Recursion rounds after the initial scan. 0 disables it. */
+    maxRecursionRounds: number;
+    /** Match entries by meaning as well as by key. */
+    semanticEnabled: boolean;
+    /**
+     * Noise floor for a semantic match, 0-1. Absolute similarity depends on the
+     * embedding model, so this is a floor rather than a confidence level.
+     */
+    semanticThreshold: number;
+    /** At most this many entries may activate on meaning alone. */
+    semanticTopK: number;
+}
+
 /** How the character and persona are turned into a system prompt. */
 export interface PromptSettings {
     /** Prepended before the character definition. */
@@ -45,6 +70,7 @@ interface SessionState {
     connection: ConnectionSettings;
     sampling: SamplingSettings;
     prompt: PromptSettings;
+    worldInfo: WorldInfoSettings;
 
     /** Avatar file name of the active persona, or null for the plain default. */
     personaAvatar: string | null;
@@ -56,6 +82,7 @@ interface SessionState {
     setConnection(patch: Partial<ConnectionSettings>): void;
     setSampling(patch: Partial<SamplingSettings>): void;
     setPrompt(patch: Partial<PromptSettings>): void;
+    setWorldInfo(patch: Partial<WorldInfoSettings>): void;
     setPersona(persona: { avatar: string | null; name: string; description: string }): void;
 }
 
@@ -89,6 +116,20 @@ export const useSessionStore = create<SessionState>()(
                 includeExamples: true,
                 historyDepth: 0,
             },
+            worldInfo: {
+                enabled: true,
+                books: [],
+                useCharacterBook: true,
+                budgetTokens: 1024,
+                scanDepth: 4,
+                maxRecursionRounds: 1,
+                semanticEnabled: false,
+                // Calibrated against the bundled local embedding model, which
+                // scores clearly related lore around 0.4 and unrelated lore
+                // around 0.1. A higher floor would never fire.
+                semanticThreshold: 0.3,
+                semanticTopK: 3,
+            },
 
             personaAvatar: null,
             userName: 'User',
@@ -97,6 +138,7 @@ export const useSessionStore = create<SessionState>()(
             setConnection: (patch) => set((state) => ({ connection: { ...state.connection, ...patch } })),
             setSampling: (patch) => set((state) => ({ sampling: { ...state.sampling, ...patch } })),
             setPrompt: (patch) => set((state) => ({ prompt: { ...state.prompt, ...patch } })),
+            setWorldInfo: (patch) => set((state) => ({ worldInfo: { ...state.worldInfo, ...patch } })),
             setPersona: (persona) =>
                 set({
                     personaAvatar: persona.avatar,
@@ -123,6 +165,7 @@ export const useSessionStore = create<SessionState>()(
                     connection: { ...current.connection, ...saved.connection },
                     sampling: { ...current.sampling, ...saved.sampling },
                     prompt: { ...current.prompt, ...saved.prompt },
+                    worldInfo: { ...current.worldInfo, ...saved.worldInfo },
                 };
             },
         },

@@ -20,6 +20,7 @@ import { splitReasoning } from '@/lib/markdown';
 import { streamCompletion } from '@/lib/sse';
 import { useSessionStore } from '@/store/session';
 import { toast } from '@/lib/toast';
+import { useWorldInfo, type WorldInfoState } from '@/features/worldinfo/useWorldInfo';
 import { activeMessageText, buildPrompt } from './prompt';
 
 /** Text being streamed right now, before it becomes a real message. */
@@ -35,6 +36,8 @@ export interface ChatSession {
     isLoading: boolean;
     isGenerating: boolean;
     streaming: StreamingState | null;
+    /** World info activated for the current turn, for the trace panel. */
+    worldInfo: WorldInfoState;
     /** The prompt that would be sent right now, for the context inspector. */
     previewPrompt(): ReturnType<typeof buildPrompt>;
 
@@ -160,6 +163,10 @@ export function useChatSession(character: Character | null, fileName: string | n
     const messages = useMemo(() => chatQuery.data?.messages ?? [], [chatQuery.data]);
     const queryKey = useMemo(() => queryKeys.chat(avatar ?? '', fileName ?? ''), [avatar, fileName]);
 
+    /** Plain text of the visible messages, which is what world info scans. */
+    const messageTexts = useMemo(() => messages.map((message) => activeMessageText(message)), [messages]);
+    const worldInfo = useWorldInfo(character, messageTexts);
+
     /** Writes messages into the cache. */
     const writeMessages = useCallback(
         (update: (current: ChatMessage[]) => ChatMessage[]) => {
@@ -248,9 +255,10 @@ export function useChatSession(character: Character | null, fileName: string | n
                 userName,
                 personaDescription,
                 settings: promptSettings,
+                ...(worldInfo.result ? { worldInfo: worldInfo.result } : {}),
             });
         },
-        [character, userName, personaDescription, promptSettings],
+        [character, userName, personaDescription, promptSettings, worldInfo.result],
     );
 
     /**
@@ -539,6 +547,7 @@ export function useChatSession(character: Character | null, fileName: string | n
         isLoading: chatQuery.isPending && Boolean(avatar && fileName),
         isGenerating,
         streaming: streamingValue,
+        worldInfo,
         previewPrompt,
         send,
         regenerate,

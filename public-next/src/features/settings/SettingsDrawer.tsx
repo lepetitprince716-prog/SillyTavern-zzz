@@ -28,6 +28,7 @@ import { cn } from '@/lib/cn';
 import { DEFAULT_SYSTEM_PROMPT, useSessionStore } from '@/store/session';
 import { applyAppearance, useUiStore } from '@/store/ui';
 import { PersonaManager } from './PersonaManager';
+import { WorldInfoSettings } from './WorldInfoSettings';
 
 const SOURCE_OPTIONS = Object.values(CHAT_COMPLETION_SOURCES).map((source) => ({
     value: source,
@@ -502,6 +503,7 @@ export function SettingsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
                     <TabsTrigger value="connection">API</TabsTrigger>
                     <TabsTrigger value="generation">Sampling</TabsTrigger>
                     <TabsTrigger value="prompt">Prompt</TabsTrigger>
+                    <TabsTrigger value="lore">Lore</TabsTrigger>
                     <TabsTrigger value="persona">You</TabsTrigger>
                     <TabsTrigger value="appearance">Look</TabsTrigger>
                 </TabsList>
@@ -513,6 +515,9 @@ export function SettingsDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
                 </TabsContent>
                 <TabsContent value="prompt">
                     <PromptTab />
+                </TabsContent>
+                <TabsContent value="lore">
+                    <WorldInfoSettings />
                 </TabsContent>
                 <TabsContent value="persona">
                     <PersonaManager />

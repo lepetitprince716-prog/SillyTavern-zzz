@@ -1,4 +1,4 @@
-import { LayoutGrid, Search, Star, Users, X } from 'lucide-react';
+import { LayoutGrid, Library, Search, Star, Users, X } from 'lucide-react';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { avatarUrl, characterTags } from '@/api/characters';
@@ -113,11 +113,24 @@ export function CharacterSidebar({ onNavigate }: { onNavigate?(): void }) {
                         Favourites
                     </button>
                     <NavLink
-                        to="/characters"
+                        to="/worldinfo"
                         onClick={onNavigate}
                         className={({ isActive }) =>
                             cn(
                                 'ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
+                                isActive ? 'text-accent' : 'text-subtle hover:bg-surface-2 hover:text-text',
+                            )
+                        }
+                    >
+                        <Library className="size-3" />
+                        Lore
+                    </NavLink>
+                    <NavLink
+                        to="/characters"
+                        onClick={onNavigate}
+                        className={({ isActive }) =>
+                            cn(
+                                'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors',
                                 isActive ? 'text-accent' : 'text-subtle hover:bg-surface-2 hover:text-text',
                             )
                         }

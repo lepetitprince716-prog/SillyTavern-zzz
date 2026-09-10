@@ -72,6 +72,8 @@ in three long-lived chunks, plus 9 KB of CSS.
 - **Personas** — create from an avatar image, edit, delete, and set a default.
   Names and descriptions are written into the settings file the classic
   interface owns, so both agree on who you are.
+- **World info** — a rebuilt activation engine plus an editor and an activation
+  trace. See [World info](#world-info) below.
 - **Chat** — streaming replies, swipes (alternative generations), regenerate,
   inline editing, delete, delete-from-here-down, per-chat drafts.
 - **Prompt assembly** — card system prompt, description, personality, scenario,
@@ -93,6 +95,62 @@ in three long-lived chunks, plus 9 KB of CSS.
 - **Keyboard** — `⌘K`/`Ctrl+K` command palette, `⌘,` settings, `Enter` to send
   (or `⌘↩`, configurable), `⌘↩` to save an edit, `Esc` to cancel.
 - **Responsive** — one layout from 390 px to ultrawide, with safe-area insets.
+
+## World info
+
+The classic engine is a three-state scan loop over entries carrying roughly
+twenty-five interacting fields — `sticky`, `cooldown`, `delay`,
+`delayUntilRecursion`, `groupWeight`, `useGroupScoring`, `probability`,
+`selectiveLogic`, and so on. It is powerful and close to impossible to predict,
+and when a reply goes wrong there is no way to see which lore was in the prompt.
+
+This is a different engine over the **same book files**. New settings go in each
+entry's `extensions.st_next`, which the classic interface ignores, so both
+interfaces edit the same books and existing ones need no migration.
+
+Four rules shape it:
+
+1. **Nothing is dropped silently.** Every candidate entry comes back with a
+   decision and a reason — matched a key, too dissimilar, outranked, lost a
+   probability roll, did not fit the budget. The activation trace in the
+   character panel lists all of them, so the count always reconciles.
+2. **The budget is spent on relevance, not on insertion order.** Entries are
+   ranked by an explicit score whose parts are shown: how recent the matching
+   message is, how many keys matched, semantic similarity, a penalty for
+   activating through recursion, and `order` as a small tiebreak. `order` then
+   decides layout among the survivors, not which ones survive.
+3. **Recursion is bounded and recorded.** Each entry reports the round it fired
+   on, so a chain reads as a list instead of emerging from a loop.
+4. **Unimplemented legacy fields are reported, not ignored.** The timers, group
+   weighting and automation hooks are not applied here. An entry that sets one
+   says so, in the editor and in the trace, and the value stays in the file so
+   the classic interface still honours it.
+
+### Matching by meaning
+
+Keyword triggers miss paraphrase, which is why cards end up with long key lists
+or entries left permanently on. Turning on **match by meaning** embeds each
+entry through the server's existing vector storage — the default source runs a
+local model, so no API key — and lets the closest entries the keys missed
+activate anyway.
+
+Two things it does not do. It does not replace keys: the semantic pass runs
+*after* keyword matching and only over what is left, so an entry that matched a
+key never consumes a semantic slot. And it does not treat similarity as
+confidence: absolute cosine scores are entirely model-dependent — the bundled
+local model scores clearly related lore around 0.4 and unrelated lore around
+0.1 — so the controls are a noise floor plus a cap on how many entries meaning
+may add, and the trace shows every real score.
+
+Individual entries can opt out, for the ones that must stay exact.
+
+### Where an entry goes
+
+`beforeCharacter`, `afterCharacter`, the example-dialogue wrappers and
+`atDepth` are placed. The author's-note positions have no note to anchor to yet
+and land where a note would sit: after the history, before the closing
+instruction. `outlet` belongs to the classic extension system and is reported as
+unplaceable rather than quietly relocated.
 
 ## Responses API
 
@@ -125,7 +183,10 @@ classic UI never sends it, so it keeps using Chat Completions.
 
 The classic UI remains the place for these:
 
-- World info / lorebooks, author's notes, and the prompt manager's ordering.
+- Author's notes, and the prompt manager's ordering.
+- The world info features listed under [World info](#world-info) as not
+  applied: entry timers (`sticky`, `cooldown`, `delay`), group weighting, and
+  automation hooks.
 - Group chats.
 - Text completion backends (KoboldAI, TextGen WebUI, NovelAI, Horde).
 - Extensions, quick replies, and slash commands.
@@ -173,6 +234,10 @@ expensive:
   `json_data` round trip that stops a save from dropping data.
 - Persona settings patching, which rewrites a shared settings file and must
   leave every key it does not own untouched.
+- World info activation, the largest suite here: key matching including CJK
+  whole-word behaviour, the four secondary-key logics, scan windows, bounded
+  recursion and its guards, semantic ranking, budget allocation by relevance,
+  prompt assembly per position, and that every entry gets a reason.
 - Transport content-type negotiation: a JSON body gets a JSON content type and
   FormData must not, or the multipart boundary is lost and uploads fail.
 

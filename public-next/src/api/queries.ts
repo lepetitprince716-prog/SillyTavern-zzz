@@ -21,6 +21,7 @@ import {
     type SecretState,
 } from './settings';
 import type { Character, ChatCompletionSource, ChatSummary, UserProfile, VersionInfo } from './types';
+import { fetchWorldInfoBook, fetchWorldInfoList, type WorldInfoBook, type WorldInfoSummary } from './worldinfo';
 
 export const queryKeys = {
     characters: ['characters'] as const,
@@ -31,6 +32,8 @@ export const queryKeys = {
     personas: ['personas'] as const,
     user: ['user'] as const,
     version: ['version'] as const,
+    worldInfoList: ['worldinfo'] as const,
+    worldInfoBook: (name: string) => ['worldinfo', name] as const,
 };
 
 /** The character library. Cached aggressively — it changes only on import. */
@@ -128,6 +131,30 @@ export function useCurrentUser(): UseQueryResult<UserProfile> {
         queryFn: ({ signal }) => fetchCurrentUser(signal),
         staleTime: 5 * 60_000,
         retry: false,
+    });
+}
+
+/** The lorebooks on disk, without their entries. */
+export function useWorldInfoList(): UseQueryResult<WorldInfoSummary[]> {
+    return useQuery({
+        queryKey: queryKeys.worldInfoList,
+        queryFn: ({ signal }) => fetchWorldInfoList(signal),
+        staleTime: 30_000,
+    });
+}
+
+/**
+ * One lorebook, with entries.
+ *
+ * `staleTime: Infinity` because the editor writes through this cache entry; a
+ * background refetch would discard edits that have not been saved yet.
+ */
+export function useWorldInfoBook(name: string | null): UseQueryResult<WorldInfoBook> {
+    return useQuery({
+        queryKey: queryKeys.worldInfoBook(name ?? ''),
+        queryFn: ({ signal }) => fetchWorldInfoBook(name as string, signal),
+        enabled: Boolean(name),
+        staleTime: Number.POSITIVE_INFINITY,
     });
 }
 

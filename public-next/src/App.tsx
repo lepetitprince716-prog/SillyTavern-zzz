@@ -4,6 +4,7 @@ import { AppShell } from '@/components/AppShell';
 import { EmptyState } from '@/components/ui/primitives';
 import { CharacterLibrary } from '@/features/characters/CharacterLibrary';
 import { ChatView } from '@/features/chat/ChatView';
+import { WorldInfoPage } from '@/features/worldinfo/WorldInfoPage';
 
 function NotFound() {
     return (
@@ -32,6 +33,10 @@ export function App() {
                     <Route
                         path="/characters"
                         element={<CharacterLibrary onOpenSettings={openSettings} />}
+                    />
+                    <Route
+                        path="/worldinfo"
+                        element={<WorldInfoPage onOpenSettings={openSettings} />}
                     />
                     <Route path="/chat/:avatar" element={<ChatView onOpenSettings={openSettings} />} />
                     <Route

@@ -12,8 +12,10 @@
 
 import { cardField } from '@/api/characters';
 import type { Character, ChatMessage, PromptMessage } from '@/api/types';
+import { WI_POSITION, type WiPosition } from '@/api/worldinfo';
 import { substituteMacros, tidy, type MacroContext } from '@/lib/macros';
 import type { PromptSettings } from '@/store/session';
+import type { ActivationResult } from '@/features/worldinfo/engine';
 
 export interface BuildPromptOptions {
     character: Character;
@@ -23,6 +25,8 @@ export interface BuildPromptOptions {
     userName: string;
     personaDescription?: string;
     settings: PromptSettings;
+    /** Activated world info, if a lorebook is in play. */
+    worldInfo?: ActivationResult;
     /** Deterministic randomness for macros, for tests. */
     random?: () => number;
 }
@@ -74,12 +78,20 @@ function macroContext(options: BuildPromptOptions): MacroContext {
 function buildSystemBlock(options: BuildPromptOptions, context: MacroContext): string {
     const { character, settings } = options;
     const sections: string[] = [];
+    const lore = (position: WiPosition) => {
+        const block = options.worldInfo?.blocks.get(position)?.trim();
+        if (block) {
+            sections.push(substituteMacros(block, context));
+        }
+    };
 
     const cardSystemPrompt = character.data?.system_prompt?.trim();
     const instruction = cardSystemPrompt || settings.systemPrompt;
     if (instruction.trim()) {
         sections.push(substituteMacros(instruction, context));
     }
+
+    lore(WI_POSITION.beforeCharacter);
 
     const description = cardField(character, 'description').trim();
     if (description) {
@@ -95,6 +107,8 @@ function buildSystemBlock(options: BuildPromptOptions, context: MacroContext): s
     if (scenario) {
         sections.push(`Scenario:\n${substituteMacros(scenario, context)}`);
     }
+
+    lore(WI_POSITION.afterCharacter);
 
     const persona = (options.personaDescription ?? '').trim();
     if (persona) {
@@ -123,6 +137,9 @@ export function selectHistory(messages: ChatMessage[], historyDepth: number): Ch
 export function buildPrompt(options: BuildPromptOptions): PromptMessage[] {
     const context = macroContext(options);
     const prompt: PromptMessage[] = [];
+    const blocks = options.worldInfo?.blocks;
+    const lore = (position: WiPosition): string =>
+        substituteMacros(blocks?.get(position)?.trim() ?? '', context);
 
     const system = buildSystemBlock(options, context);
     if (system) {
@@ -135,19 +152,48 @@ export function buildPrompt(options: BuildPromptOptions): PromptMessage[] {
             const rendered = examples
                 .map((block) => substituteMacros(block, context))
                 .join('\n\n');
-            prompt.push({
-                role: 'system',
-                content: `Example conversations between ${options.character.name} and ${options.userName}:\n\n${rendered}`,
-            });
+            const wrapped = [
+                lore(WI_POSITION.exampleMessagesTop),
+                `Example conversations between ${options.character.name} and ${options.userName}:\n\n${rendered}`,
+                lore(WI_POSITION.exampleMessagesBottom),
+            ]
+                .filter(Boolean)
+                .join('\n\n');
+            prompt.push({ role: 'system', content: wrapped });
         }
     }
 
-    for (const message of selectHistory(options.messages, options.settings.historyDepth)) {
-        const content = substituteMacros(activeMessageText(message), context).trim();
-        if (!content) {
-            continue;
+    const history = selectHistory(options.messages, options.settings.historyDepth);
+    const depthBlocks = options.worldInfo?.depthBlocks;
+
+    history.forEach((message, index) => {
+        // `atDepth` counts back from the end, so depth N sits before the Nth
+        // message from the last. Depth 0 lands after the whole history.
+        const depth = history.length - index;
+        const atDepth = depthBlocks?.get(depth)?.trim();
+        if (atDepth) {
+            prompt.push({ role: 'system', content: substituteMacros(atDepth, context) });
         }
-        prompt.push({ role: message.is_user ? 'user' : 'assistant', content });
+
+        const content = substituteMacros(activeMessageText(message), context).trim();
+        if (content) {
+            prompt.push({ role: message.is_user ? 'user' : 'assistant', content });
+        }
+    });
+
+    const atEnd = depthBlocks?.get(0)?.trim();
+    if (atEnd) {
+        prompt.push({ role: 'system', content: substituteMacros(atEnd, context) });
+    }
+
+    // The author's note positions have no note to anchor to yet, so their
+    // content goes where a note would sit: after the history, before the
+    // closing instruction.
+    for (const position of [WI_POSITION.authorNoteTop, WI_POSITION.authorNoteBottom] as const) {
+        const block = lore(position);
+        if (block) {
+            prompt.push({ role: 'system', content: block });
+        }
     }
 
     const jailbreak = options.settings.jailbreak.trim();
