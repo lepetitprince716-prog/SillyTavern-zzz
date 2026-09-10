@@ -16,6 +16,8 @@ import { test, expect } from '@playwright/test';
 
 const COMFY_URL = 'http://127.0.0.1:8188';
 
+const AVATAR = 'default_Seraphina.png';
+
 /** 832×1216 — NovelAI's portrait default, and the shape most renders use. */
 const PORTRAIT_RATIO = 832 / 1216;
 
@@ -205,5 +207,216 @@ test.describe('image generation', () => {
         expect(attachment.width).toBe(832);
         expect(attachment.height).toBe(1216);
         expect(typeof attachment.seed).toBe('number');
+    });
+});
+
+
+/**
+ * The images side panel.
+ *
+ * Inline rendering answers "what did this message look like"; it does not
+ * answer "where is the render from twenty messages ago", and scrolling is the
+ * only alternative. The panel is a navigator for that, so the assertions that
+ * matter are about getting *back* to a message — including one that has
+ * scrolled out of the bounded render window and so is not in the DOM at all.
+ */
+test.describe('image panel', () => {
+    /** A 1x1 PNG, so a seeded attachment points at a file that exists. */
+    const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/'
+        + 'q842iQAAAABJRU5ErkJggg==';
+
+    /** Writes a chat file directly: the window case needs more than 120 messages. */
+    async function seedChat(request, { fileName, images, filler }) {
+        const token = await (await request.get('/csrf-token')).json();
+
+        // Without the files on disk the folder tab would list nothing and the
+        // tiles would render their failure state.
+        for (const image of images) {
+            const name = image.url.split('/').pop().replace(/\.png$/, '');
+            const upload = await request.post('/api/images/upload', {
+                headers: { 'X-CSRF-Token': token.token },
+                data: { image: PIXEL, format: 'png', ch_name: 'Seraphina', filename: name },
+            });
+            expect(upload.ok()).toBeTruthy();
+        }
+
+        const message = (mes, media) => ({
+            name: 'Seraphina',
+            is_user: false,
+            send_date: '2026-09-10 @04h 10m 00s 000ms',
+            mes,
+            ...(media ? { extra: { media, media_layout: 'inline', inline_image: true } } : {}),
+        });
+        const chat = [
+            {
+                user_name: 'User',
+                character_name: 'Seraphina',
+                create_date: '2026-09-10@04h10m00s',
+                chat_metadata: {},
+            },
+            message('The oldest render.', [images[0]]),
+            ...Array.from({ length: filler }, (_, i) => message(`Filler ${i}.`)),
+            message('A pair in one message.', images.slice(1)),
+        ];
+        const response = await request.post('/api/chats/save', {
+            headers: { 'X-CSRF-Token': token.token },
+            data: { ch_name: 'Seraphina', file_name: fileName, avatar_url: AVATAR, chat, force: true },
+        });
+        expect(response.ok()).toBeTruthy();
+        return chat;
+    }
+
+    /** An attachment record, as a render writes one. */
+    function attachment(name, { width, height, title, seed }) {
+        return {
+            url: `/user/images/Seraphina/${name}`,
+            type: 'image',
+            source: 'generated',
+            title,
+            width,
+            height,
+            seed,
+            provider: 'comfyui',
+            steps: 24,
+            cfgScale: 5,
+        };
+    }
+
+    async function openPanel(page, fileName) {
+        await page.goto(`/next/chat/${encodeURIComponent(AVATAR)}/${encodeURIComponent(fileName)}`);
+        await expect(page.locator('article').first()).toBeVisible();
+        await page.getByRole('button', { name: 'Show the side panel' }).click();
+        await page.getByRole('radio', { name: 'Images' }).click();
+        return page.getByRole('complementary', { name: 'Chat details' });
+    }
+
+    test('lists the chat\'s renders newest first, captioned by prompt', async ({ page, request }) => {
+        const images = [
+            attachment('panel-a.png', { width: 832, height: 1216, title: 'the oldest one', seed: 1 }),
+            attachment('panel-b.png', { width: 1216, height: 832, title: 'the middle one', seed: 2 }),
+            attachment('panel-c.png', { width: 1024, height: 1024, title: 'the newest one', seed: 3 }),
+        ];
+        await seedChat(request, { fileName: 'Panel list', images, filler: 2 });
+        const panel = await openPanel(page, 'Panel list');
+
+        await expect(panel.locator('figure')).toHaveCount(3);
+        // Newest first, and captioned by the prompt: sender and time are
+        // identical on every tile in a one-to-one chat and identify nothing.
+        await expect(panel.locator('figcaption')).toHaveText([
+            'the newest one',
+            'the middle one',
+            'the oldest one',
+        ]);
+        await expect(page.getByRole('radio', { name: 'This chat (3)' })).toBeVisible();
+    });
+
+    test('jumps back to a message that is outside the render window', async ({ page, request }) => {
+        const images = [
+            attachment('panel-a.png', { width: 832, height: 1216, title: 'far back', seed: 1 }),
+            attachment('panel-b.png', { width: 1216, height: 832, title: 'recent one', seed: 2 }),
+            attachment('panel-c.png', { width: 1024, height: 1024, title: 'recent two', seed: 3 }),
+        ];
+        // 130 filler messages, so message 1 sits past the 120-message window.
+        await seedChat(request, { fileName: 'Panel jump', images, filler: 130 });
+        const panel = await openPanel(page, 'Panel jump');
+
+        // The oldest message is not rendered at all to begin with.
+        await expect(page.locator('[data-message-index="1"]')).toHaveCount(0);
+
+        const oldest = panel.locator('figure').last();
+        await oldest.hover();
+        await oldest.getByRole('button', { name: 'Go to this message' }).click();
+
+        // The window has to widen for the message to exist before it can be
+        // scrolled to — a jump that silently does nothing would be worse than
+        // no jump at all.
+        await expect(page.locator('[data-message-index="1"]')).toBeVisible();
+        // Polled rather than snapshotted: the scroll settles over a frame or
+        // two once the heights either side of the target have resolved.
+        const viewport = page.viewportSize();
+        await expect
+            .poll(async () => {
+                const box = await page.locator('[data-message-index="1"]').boundingBox();
+                return box.y > -100 && box.y < viewport.height;
+            }, { message: 'the revealed message should be in view', timeout: 10000 })
+            .toBe(true);
+    });
+
+    test('lists the character folder and pairs settings for renders from this chat', async ({ page, request }) => {
+        const images = [
+            attachment('panel-a.png', { width: 832, height: 1216, title: 'from this chat', seed: 4242 }),
+            attachment('panel-b.png', { width: 1216, height: 832, title: 'also this chat', seed: 2 }),
+            attachment('panel-c.png', { width: 1024, height: 1024, title: 'and this one', seed: 3 }),
+        ];
+        await seedChat(request, { fileName: 'Panel folder', images, filler: 2 });
+        const panel = await openPanel(page, 'Panel folder');
+
+        await page.getByRole('radio', { name: /^All of/ }).click();
+        // The folder holds every render from every chat, so it is at least as
+        // large as this chat's own list.
+        await expect(panel.locator('figure').first()).toBeVisible();
+        expect(await panel.locator('figure').count()).toBeGreaterThanOrEqual(3);
+
+        // A bare file carries no seed; pairing it with the chat attachment
+        // recovers one.
+        await panel.getByRole('button', { name: 'View from this chat' }).click();
+        await expect(page.locator('.lightbox-stage')).toBeVisible();
+        await page.getByRole('button', { name: 'Show details' }).click();
+        await expect(page.getByRole('dialog').getByText('4242')).toBeVisible();
+    });
+
+    test('removing from the panel removes it from the message', async ({ page, request }) => {
+        const images = [
+            attachment('panel-a.png', { width: 832, height: 1216, title: 'keep me', seed: 1 }),
+            attachment('panel-b.png', { width: 1216, height: 832, title: 'delete me', seed: 2 }),
+            attachment('panel-c.png', { width: 1024, height: 1024, title: 'keep me too', seed: 3 }),
+        ];
+        await seedChat(request, { fileName: 'Panel remove', images, filler: 2 });
+        const panel = await openPanel(page, 'Panel remove');
+
+        const target = panel.locator('figure').filter({ hasText: 'delete me' });
+        await target.hover();
+        await target.getByRole('button', { name: 'Remove from the message' }).click();
+
+        await expect(panel.locator('figure')).toHaveCount(2);
+        await expect(panel.locator('figure').filter({ hasText: 'delete me' })).toHaveCount(0);
+        // And gone from the message itself, not just the panel. Two remain:
+        // one in the oldest message and one left in the pair.
+        await expect(page.locator('.media-figure')).toHaveCount(2);
+    });
+
+    test('is reachable at phone width, where it used to be hidden entirely', async ({ page, request }) => {
+        const images = [
+            attachment('panel-a.png', { width: 832, height: 1216, title: 'one', seed: 1 }),
+            attachment('panel-b.png', { width: 1216, height: 832, title: 'two', seed: 2 }),
+            attachment('panel-c.png', { width: 1024, height: 1024, title: 'three', seed: 3 }),
+        ];
+        await seedChat(request, { fileName: 'Panel phone', images, filler: 2 });
+
+        await page.setViewportSize({ width: 400, height: 860 });
+        await page.goto(`/next/chat/${encodeURIComponent(AVATAR)}/${encodeURIComponent('Panel phone')}`);
+        await expect(page.locator('article').first()).toBeVisible();
+
+        // The toggle used to carry `max-xl:hidden`, so on a phone pressing it
+        // did nothing and the panel was unreachable.
+        await page.getByRole('button', { name: 'Show the side panel' }).click();
+        const drawer = page.getByRole('dialog');
+        await expect(drawer).toBeVisible();
+        await page.getByRole('radio', { name: 'Images' }).click();
+        await expect(drawer.locator('figure')).toHaveCount(3);
+
+        // Nothing may scroll sideways at phone width. Measured through a
+        // locator rather than `page.evaluate`, so no browser globals are
+        // referenced in a file linted as Node.
+        const overflow = await page.locator('html').evaluate(
+            (element) => element.scrollWidth - element.clientWidth,
+        );
+        expect(overflow).toBe(0);
+
+        // The drawer covers the chat it points at, so jumping closes it.
+        const tile = drawer.locator('figure').first();
+        await tile.hover();
+        await tile.getByRole('button', { name: 'Go to this message' }).click();
+        await expect(page.getByRole('dialog')).toHaveCount(0);
     });
 });

@@ -598,3 +598,15 @@
 .lightbox-stage[data-dragging='true'] {
     cursor: grabbing;
 }
+
+/* A message the image panel jumped to. Brief, and only a tint: a border or a
+   scale would shift the layout of everything below it mid-scroll. */
+@keyframes message-flash {
+    from { background-color: color-mix(in oklab, var(--accent) 22%, transparent); }
+    to { background-color: transparent; }
+}
+
+.message-flash {
+    border-radius: var(--radius-card);
+    animation: message-flash 1.4s var(--ease-out-quint) both;
+}

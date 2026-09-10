@@ -4,13 +4,17 @@ import { useNavigate, useParams } from 'react-router';
 import { newChatFileName } from '@/api/chats';
 import { useCharacterChats, useCharacters } from '@/api/queries';
 import { SOURCE_LABELS } from '@/api/types';
+import { SegmentedControl } from '@/components/ui/controls';
+import { Drawer } from '@/components/ui/overlays';
 import { EmptyState, Skeleton } from '@/components/ui/primitives';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSessionStore } from '@/store/session';
 import { useUiStore } from '@/store/ui';
 import type { ImageRequest } from '@/api/images';
 import type { MediaAttachment, MediaLayout } from '@/api/types';
 import { CharacterInspector } from '@/features/characters/CharacterInspector';
 import { ImageGenerationDialog } from '@/features/images/ImageGenerationDialog';
+import { ImagePanel } from '@/features/images/ImagePanel';
 import { BACKENDS } from '@/features/textcompletion/backends';
 import { promptSuggestions } from '@/features/images/prompts';
 import { useImageGeneration } from '@/features/images/useImageGeneration';
@@ -49,6 +53,30 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
     const textSettings = useSessionStore((state) => state.text);
     const personaAvatar = useSessionStore((state) => state.personaAvatar);
     const inspectorOpen = useUiStore((state) => state.inspectorOpen);
+    const toggleInspector = useUiStore((state) => state.toggleInspector);
+    const panelTab = useUiStore((state) => state.panelTab);
+    const setPanelTab = useUiStore((state) => state.setPanelTab);
+    // Matches Tailwind's `xl`, where the side panel has room to be a column
+    // rather than an overlay.
+    const isWide = useMediaQuery('(min-width: 80rem)');
+
+    /**
+     * The message the image panel asked to jump to.
+     *
+     * The nonce is what lets the same message be revealed twice: the index
+     * alone would not change, so the second request would do nothing.
+     */
+    const [reveal, setReveal] = useState<{ index: number; nonce: number } | null>(null);
+
+    // The panel's open state is persisted, which is right for desktop but
+    // would otherwise greet a phone — or a window someone just narrowed —
+    // with a modal drawer over the chat. `AppShell` guards the left rail the
+    // same way.
+    useEffect(() => {
+        if (!isWide) {
+            toggleInspector(false);
+        }
+    }, [isWide, toggleInspector]);
 
     const character = useMemo(
         () => charactersQuery.data?.find((item) => item.avatar === avatar) ?? null,
@@ -204,6 +232,41 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
         ? !textBackend.needsUrl || Boolean(textSettings.url.trim())
         : Boolean(connection.model);
 
+    const jumpToMessage = (index: number) => {
+        setReveal({ index, nonce: Date.now() });
+        // On a phone the panel covers the chat it is pointing at.
+        if (!isWide) {
+            toggleInspector(false);
+        }
+    };
+
+    const sidePanel = (
+        <div className="space-y-4 p-5">
+            <SegmentedControl<'character' | 'images'>
+                label="Side panel"
+                value={panelTab}
+                onValueChange={setPanelTab}
+                options={[
+                    { value: 'character', label: 'Character' },
+                    { value: 'images', label: 'Images' },
+                ]}
+            />
+            {panelTab === 'images' ? (
+                <ImagePanel
+                    messages={session.messages}
+                    characterName={character.name}
+                    onJumpToMessage={jumpToMessage}
+                    onRemove={session.removeMedia}
+                    onReuseSeed={reuseSettings}
+                />
+            ) : (
+                <div className="-mx-5 -mb-5">
+                    <CharacterInspector character={character} session={session} />
+                </div>
+            )}
+        </div>
+    );
+
     return (
         <div className="flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
@@ -236,6 +299,7 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                         pendingRender={render.pending}
                         renderElapsedMs={render.elapsedMs}
                         onCancelRender={render.cancel}
+                        reveal={reveal}
                     />
                 )}
 
@@ -263,11 +327,27 @@ export function ChatView({ onOpenSettings }: { onOpenSettings(): void }) {
                 />
             </div>
 
-            {inspectorOpen ? (
-                <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border bg-surface/40 xl:block">
-                    <CharacterInspector character={character} session={session} />
-                </aside>
-            ) : null}
+            {isWide ? (
+                inspectorOpen ? (
+                    <aside
+                        aria-label="Chat details"
+                        className="w-80 shrink-0 overflow-y-auto border-l border-border bg-surface/40"
+                    >
+                        {sidePanel}
+                    </aside>
+                ) : null
+            ) : (
+                // Below `xl` the same panel is an overlay. The image list is
+                // arguably more useful on a phone than on a desktop, and it
+                // used to be unreachable there.
+                <Drawer
+                    open={inspectorOpen}
+                    onOpenChange={(open) => toggleInspector(open)}
+                    title={character.name}
+                >
+                    <div className="-mx-5 -my-4">{sidePanel}</div>
+                </Drawer>
+            )}
         </div>
     );
 }

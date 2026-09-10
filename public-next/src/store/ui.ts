@@ -4,6 +4,8 @@ import { persist } from 'zustand/middleware';
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type Density = 'compact' | 'comfortable' | 'spacious';
 export type ProseFont = 'sans' | 'serif';
+/** Which list the right-hand panel is showing. */
+export type PanelTab = 'character' | 'images';
 
 interface UiState {
     theme: ThemeMode;
@@ -15,8 +17,9 @@ interface UiState {
     proseSize: number;
     /** Left rail open on desktop; on mobile it becomes an overlay. */
     sidebarOpen: boolean;
-    /** Right inspector panel (character details, chat history). */
+    /** Right inspector panel (character details, chat history, images). */
     inspectorOpen: boolean;
+    panelTab: PanelTab;
     showTimestamps: boolean;
     showTokenCounts: boolean;
     /** Send on Enter; Shift+Enter inserts a newline. Inverted when false. */
@@ -29,6 +32,7 @@ interface UiState {
     setProseSize(size: number): void;
     toggleSidebar(open?: boolean): void;
     toggleInspector(open?: boolean): void;
+    setPanelTab(tab: PanelTab): void;
     setShowTimestamps(value: boolean): void;
     setShowTokenCounts(value: boolean): void;
     setEnterToSend(value: boolean): void;
@@ -44,6 +48,7 @@ export const useUiStore = create<UiState>()(
             proseSize: 1,
             sidebarOpen: true,
             inspectorOpen: false,
+            panelTab: 'character',
             showTimestamps: true,
             showTokenCounts: false,
             enterToSend: true,
@@ -55,6 +60,7 @@ export const useUiStore = create<UiState>()(
             setProseSize: (proseSize) => set({ proseSize }),
             toggleSidebar: (open) => set((state) => ({ sidebarOpen: open ?? !state.sidebarOpen })),
             toggleInspector: (open) => set((state) => ({ inspectorOpen: open ?? !state.inspectorOpen })),
+            setPanelTab: (panelTab) => set({ panelTab }),
             setShowTimestamps: (showTimestamps) => set({ showTimestamps }),
             setShowTokenCounts: (showTokenCounts) => set({ showTokenCounts }),
             setEnterToSend: (enterToSend) => set({ enterToSend }),

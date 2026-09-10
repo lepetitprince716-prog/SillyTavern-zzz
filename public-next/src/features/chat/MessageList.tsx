@@ -35,6 +35,13 @@ export interface MessageListProps {
     pendingRender?: PendingRender | null;
     renderElapsedMs?: number;
     onCancelRender?(): void;
+    /**
+     * A message to scroll to and highlight, from the image panel.
+     *
+     * The nonce is what makes asking for the *same* message twice work: the
+     * index alone would not change, so nothing would happen the second time.
+     */
+    reveal?: { index: number; nonce: number } | null;
 }
 
 export function MessageList({
@@ -47,13 +54,20 @@ export function MessageList({
     pendingRender,
     renderElapsedMs = 0,
     onCancelRender,
+    reveal,
 }: MessageListProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [windowSize, setWindowSize] = useState(INITIAL_WINDOW);
     const [atBottom, setAtBottom] = useState(true);
     const { messages, streaming, isGenerating } = session;
 
-    const hiddenCount = Math.max(0, messages.length - windowSize);
+    // A revealed message has to be in the DOM to be scrolled to, so the window
+    // widens to include it. Derived during render rather than pushed into state
+    // from an effect, which would cost a second render and a paint.
+    const effectiveWindow = reveal
+        ? Math.max(windowSize, messages.length - reveal.index)
+        : windowSize;
+    const hiddenCount = Math.max(0, messages.length - effectiveWindow);
     const visible = hiddenCount > 0 ? messages.slice(hiddenCount) : messages;
 
     const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
@@ -74,19 +88,74 @@ export function MessageList({
     }, []);
 
     // Follow new content only while the reader is already at the bottom, so
-    // scrolling up to re-read is never yanked back down mid-stream.
+    // scrolling up to re-read is never yanked back down mid-stream. A reveal
+    // is an explicit jump, so it wins over sticking to the bottom.
     useLayoutEffect(() => {
-        if (atBottom) {
+        if (atBottom && !reveal) {
             scrollToBottom(streaming ? 'auto' : 'smooth');
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [messages.length, streaming?.text, atBottom, scrollToBottom]);
+    }, [messages.length, streaming?.text, atBottom, scrollToBottom, reveal]);
 
     // Land at the newest message on first paint of a chat.
     useEffect(() => {
         const frame = requestAnimationFrame(() => scrollToBottom('auto'));
         return () => cancelAnimationFrame(frame);
     }, [scrollToBottom]);
+
+    // Scroll to a message the image panel asked for, and flash it so it is
+    // obvious which one was meant.
+    useEffect(() => {
+        if (!reveal) {
+            return;
+        }
+
+        let frame = 0;
+        const find = () => scrollRef.current?.querySelector(`[data-message-index="${reveal.index}"]`);
+
+        // One frame, so the widened window has been painted first.
+        frame = requestAnimationFrame(() => {
+            const element = find();
+            const container = scrollRef.current;
+            if (!(element instanceof HTMLElement) || !container) {
+                return;
+            }
+
+            // A long jump scrolls instantly. Smooth scrolling thousands of
+            // pixels is a two-second blur that shows nothing, and it does not
+            // even arrive: `content-visibility: auto` means off-screen messages
+            // are only *estimated* heights until they are scrolled into view,
+            // so the target moves under a long animation and the scroll lands
+            // in the wrong place.
+            const distance = Math.abs(
+                element.getBoundingClientRect().top - container.getBoundingClientRect().top,
+            );
+            const isNear = distance < container.clientHeight * 2;
+            element.scrollIntoView({ behavior: isNear ? 'smooth' : 'auto', block: 'center' });
+
+            element.classList.add('message-flash');
+            // Removed on animation end rather than a timer, so a re-reveal
+            // during the flash restarts it cleanly.
+            element.addEventListener(
+                'animationend',
+                () => element.classList.remove('message-flash'),
+                { once: true },
+            );
+
+            if (isNear) {
+                return;
+            }
+            // One correction after the heights either side have resolved.
+            frame = requestAnimationFrame(() => {
+                const settled = find();
+                if (settled instanceof HTMLElement) {
+                    settled.scrollIntoView({ behavior: 'auto', block: 'center' });
+                }
+            });
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [reveal]);
 
     const lastIndex = messages.length - 1;
     const last = messages[lastIndex];

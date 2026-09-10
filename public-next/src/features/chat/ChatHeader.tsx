@@ -122,11 +122,12 @@ export function ChatHeader({
                 </IconButton>
             </Tooltip>
 
-            <Tooltip content={inspectorOpen ? 'Hide character panel' : 'Show character panel'}>
+            {/* No longer desktop-only: below `xl` the panel is a drawer, and
+                its image list is arguably more useful on a phone. */}
+            <Tooltip content={inspectorOpen ? 'Hide the side panel' : 'Show the side panel'}>
                 <IconButton
-                    label={inspectorOpen ? 'Hide character panel' : 'Show character panel'}
+                    label={inspectorOpen ? 'Hide the side panel' : 'Show the side panel'}
                     variant="ghost"
-                    className="max-xl:hidden"
                     onClick={() => toggleInspector()}
                 >
                     {inspectorOpen ? (

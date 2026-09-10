@@ -17,9 +17,15 @@ import { test, expect } from '@playwright/test';
 const OOBA_URL = 'http://127.0.0.1:5100';
 const KOBOLD_URL = 'http://127.0.0.1:5101';
 
-/** What the mock backend last received. */
-async function lastRequest(request, base) {
-    const response = await request.get(`${base}/last-request`);
+/**
+ * The mock backend's most recent request whose prompt contains `marker`.
+ *
+ * Not "the last request": these specs run in parallel against one mock, so a
+ * single slot means another worker's generation can land between the send and
+ * the read — which looks exactly like the product sending the wrong body.
+ */
+async function requestContaining(request, base, marker) {
+    const response = await request.get(`${base}/requests?contains=${encodeURIComponent(marker)}`);
     return response.json();
 }
 
@@ -83,7 +89,7 @@ test.describe('text completion', () => {
         // The reply the mock returns.
         await expect(page.getByText(/looks up from the map/)).toBeVisible({ timeout: 20000 });
 
-        const { path, body } = await lastRequest(request, OOBA_URL);
+        const { path, body } = await requestContaining(request, OOBA_URL, 'Where are we going?');
         expect(path).toBe('/v1/completions');
 
         // One string, not a message array.
@@ -111,11 +117,11 @@ test.describe('text completion', () => {
     test('sends each backend only the parameter names it uses', async ({ page, request }) => {
         await openChat(page);
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
-        await page.locator('textarea[aria-label="Message"]').fill('One.');
+        await page.locator('textarea[aria-label="Message"]').fill('Marker one.');
         await page.keyboard.press('Enter');
         await expect(page.getByText(/looks up from the map/)).toBeVisible({ timeout: 20000 });
 
-        const ooba = (await lastRequest(request, OOBA_URL)).body;
+        const ooba = (await requestContaining(request, OOBA_URL, 'Marker one.')).body;
         expect(ooba.max_tokens).toBeGreaterThan(0);
         expect(ooba.repetition_penalty).toBeGreaterThan(1);
         // llama.cpp's spellings must not also be present.
@@ -125,11 +131,11 @@ test.describe('text completion', () => {
 
         // Now the same chat against Kobold's native API.
         await useBackend(page, { backend: 'KoboldAI / KoboldCpp', url: KOBOLD_URL });
-        await page.locator('textarea[aria-label="Message"]').fill('Two.');
+        await page.locator('textarea[aria-label="Message"]').fill('Marker two.');
         await page.keyboard.press('Enter');
         await expect(page.getByText(/looks up from the map/).first()).toBeVisible({ timeout: 20000 });
 
-        const kobold = (await lastRequest(request, KOBOLD_URL)).body;
+        const kobold = (await requestContaining(request, KOBOLD_URL, 'Marker two.')).body;
         expect(kobold.max_length).toBeGreaterThan(0);
         expect(kobold.max_context_length).toBeGreaterThan(0);
         expect(kobold.rep_pen).toBeGreaterThan(1);
@@ -174,7 +180,7 @@ test.describe('text completion', () => {
         await useBackend(page, { backend: 'Text Generation WebUI', url: OOBA_URL });
 
         // The inspector is the right-hand panel, toggled from the header.
-        await page.getByRole('button', { name: 'Show character panel' }).click();
+        await page.getByRole('button', { name: 'Show the side panel' }).click();
         await page.getByRole('button', { name: 'Inspect prompt' }).click();
 
         const dialog = page.getByRole('dialog');

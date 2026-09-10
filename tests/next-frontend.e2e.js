@@ -130,7 +130,7 @@ test.describe('next frontend', () => {
         expect(consoleErrors).toEqual([]);
     });
 
-    test('opens the command palette, settings and the character panel', async ({ page }) => {
+    test('opens the command palette, settings and the side panel', async ({ page }) => {
         await page.goto('/next/characters');
         await page.locator('nav[aria-label="Characters"] a').first().click();
         await expect(page.locator('textarea[aria-label="Message"]')).toBeVisible();
@@ -148,7 +148,7 @@ test.describe('next frontend', () => {
         }
         await page.keyboard.press('Escape');
 
-        await page.getByRole('button', { name: /character panel/ }).click();
+        await page.getByRole('button', { name: /side panel/ }).click();
         await page.getByRole('button', { name: 'Inspect prompt' }).click();
         await expect(page.getByRole('heading', { name: 'Prompt preview' })).toBeVisible();
         await page.keyboard.press('Escape');

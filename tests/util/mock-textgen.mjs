@@ -5,9 +5,12 @@
  *   5100  an OpenAI-compatible completions server (Text Generation WebUI shape)
  *   5101  KoboldAI / KoboldCpp's native API
  *
- * Each one echoes back the request it received under a `__request` key on a
- * side channel (`GET /last-request`), which is how the tests check that the
- * right parameter names — and only those — reached the backend.
+ * Each one keeps a short history of the requests it received, readable on a
+ * side channel: `GET /last-request` for the most recent, and
+ * `GET /requests?contains=<text>` for the most recent whose prompt contains
+ * that text. The second exists because the specs run in parallel against one
+ * mock, and a single "last request" slot means two workers overwrite each
+ * other's — which looks exactly like a product bug.
  *
  * Run alongside the server before `npm run test:e2e`:
  *
@@ -54,19 +57,38 @@ function chunks() {
     return REPLY.match(/.{1,12}/g) ?? [REPLY];
 }
 
+/** How many requests each mock remembers. */
+const HISTORY_LIMIT = 40;
+
 function makeServer({ port, name, handle }) {
-    let lastRequest = null;
+    /** @type {Array<{path: string, body: any}>} */
+    const history = [];
+
     const server = http.createServer(async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
 
         if (url.pathname === '/last-request') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify(lastRequest ?? {}));
+            return res.end(JSON.stringify(history.at(-1) ?? {}));
+        }
+
+        if (url.pathname === '/requests') {
+            const contains = url.searchParams.get('contains') ?? '';
+            // Newest first, so a test finds its own most recent request.
+            const match = [...history].reverse().find((entry) => {
+                const prompt = entry.body?.prompt ?? entry.body?.input ?? '';
+                return String(prompt).includes(contains);
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(match ?? {}));
         }
 
         const body = req.method === 'POST' ? await readBody(req) : {};
         if (req.method === 'POST') {
-            lastRequest = { path: url.pathname, body };
+            history.push({ path: url.pathname, body });
+            if (history.length > HISTORY_LIMIT) {
+                history.shift();
+            }
             console.log(`[${name}] ${url.pathname} ${Object.keys(body).sort().join(',')}`);
         }
         handle({ url, req, res, body });
