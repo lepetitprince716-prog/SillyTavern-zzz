@@ -11,6 +11,7 @@ import mime from 'mime-types';
 
 import { delay, getBasicAuthHeader, isValidUrl, tryParse } from '../util.js';
 import { readSecret, SECRET_KEYS } from './secrets.js';
+import { runComfyWorkflow } from '../images/comfyui.js';
 import { getFileNameValidationFunction } from '../middleware/validateFileName.js';
 import { AIMLAPI_HEADERS } from '../constants.js';
 
@@ -560,74 +561,31 @@ comfy.post('/rename-workflow', getFileNameValidationFunction('old_name'), getFil
 });
 
 comfy.post('/generate', async (request, response) => {
-    try {
-        let item;
-        const url = new URL(urlJoin(request.body.url, '/prompt'));
-
-        const controller = new AbortController();
-        request.socket.removeAllListeners('close');
-        request.socket.on('close', function () {
-            if (!response.writableEnded && !item) {
-                const interruptUrl = new URL(urlJoin(request.body.url, '/interrupt'));
-                fetch(interruptUrl, { method: 'POST', headers: { 'Authorization': getBasicAuthHeader(request.body.auth) } });
-            }
+    const controller = new AbortController();
+    request.socket.removeAllListeners('close');
+    request.socket.on('close', function () {
+        if (!response.writableEnded) {
             controller.abort();
-        });
+        }
+    });
 
-        const promptResult = await fetch(url, {
-            method: 'POST',
-            body: request.body.prompt,
+    try {
+        // Submitting, polling and fetching the render live in
+        // src/images/comfyui.js, shared with /api/image-generation. That runner
+        // bounds the wait: the poll interval backs off and the whole thing has
+        // a deadline, where this route used to poll every 100ms inside
+        // `while (true)` and would hang forever if the server restarted
+        // mid-render. The request and response shapes are unchanged.
+        const result = await runComfyWorkflow({
+            url: request.body.url,
+            workflow: request.body.prompt,
+            auth: request.body.auth,
+            signal: controller.signal,
         });
-        if (!promptResult.ok) {
-            const text = await promptResult.text();
-            throw new Error('ComfyUI returned an error.', { cause: tryParse(text) });
-        }
-
-        /** @type {any} */
-        const data = await promptResult.json();
-        const id = data.prompt_id;
-        const historyUrl = new URL(urlJoin(request.body.url, '/history'));
-        while (true) {
-            const result = await fetch(historyUrl);
-            if (!result.ok) {
-                throw new Error('ComfyUI returned an error.');
-            }
-            /** @type {any} */
-            const history = await result.json();
-            item = history[id];
-            if (item) {
-                break;
-            }
-            await delay(100);
-        }
-        if (item.status.status_str === 'error') {
-            // Report node tracebacks if available
-            const errorMessages = item.status?.messages
-                ?.filter(it => it[0] === 'execution_error')
-                .map(it => it[1])
-                .map(it => `${it.node_type} [${it.node_id}] ${it.exception_type}: ${it.exception_message}`)
-                .join('\n') || '';
-            throw new Error(`ComfyUI generation did not succeed.\n\n${errorMessages}`.trim());
-        }
-        const outputs = Object.keys(item.outputs).map(it => item.outputs[it]);
-        console.debug('ComfyUI outputs:', outputs);
-        const imgInfo = outputs.map(it => it.images).flat()[0] ?? outputs.map(it => it.gifs).flat()[0];
-        if (!imgInfo) {
-            throw new Error('ComfyUI did not return any recognizable outputs.');
-        }
-        const imgUrl = new URL(urlJoin(request.body.url, '/view'));
-        imgUrl.search = `?filename=${imgInfo.filename}&subfolder=${imgInfo.subfolder}&type=${imgInfo.type}`;
-        const imgResponse = await fetch(imgUrl);
-        if (!imgResponse.ok) {
-            throw new Error('ComfyUI returned an error.');
-        }
-        const format = path.extname(imgInfo.filename).slice(1).toLowerCase() || 'png';
-        const imgBuffer = await imgResponse.arrayBuffer();
-        return response.send({ format: format, data: Buffer.from(imgBuffer).toString('base64') });
+        return response.send(result);
     } catch (error) {
         console.error('ComfyUI error:', error);
-        response.status(500).send(error.message);
-        return response;
+        return response.status(500).send(error.message);
     }
 });
 

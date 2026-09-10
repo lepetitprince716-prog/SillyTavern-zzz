@@ -380,7 +380,7 @@ async function deleteVectorItems(directories, collectionId, source, sourceSettin
  * @param {string} searchText - The text to search for
  * @param {number} topK - The number of results to return
  * @param {number} threshold - The threshold for the search
- * @returns {Promise<{hashes: number[], metadata: object[]}>} - The metadata of the items that match the search text
+ * @returns {Promise<{hashes: number[], metadata: object[], scores: {hash: number, score: number}[]}>} - Matching item metadata, every queried hash, and the similarity per hash
  */
 async function queryCollection(directories, collectionId, source, sourceSettings, searchText, topK, threshold) {
     const store = await getIndex(directories, collectionId, source, sourceSettings);
@@ -389,7 +389,11 @@ async function queryCollection(directories, collectionId, source, sourceSettings
     const result = await store.queryItems(vector, topK);
     const metadata = result.filter(x => x.score >= threshold).map(x => x.item.metadata);
     const hashes = result.map(x => Number(x.item.metadata.hash));
-    return { metadata, hashes };
+    // Similarity per hash, so a caller can rank and explain matches rather than
+    // only learning which ones cleared the threshold. Additive: existing
+    // callers read `metadata` and `hashes` and are unaffected.
+    const scores = result.map(x => ({ hash: Number(x.item.metadata.hash), score: x.score }));
+    return { metadata, hashes, scores };
 }
 
 /**

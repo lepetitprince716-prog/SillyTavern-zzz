@@ -323,9 +323,17 @@ router.post('/generate', async function (request, response) {
                 break;
         }
 
+        // `api_type` and `api_server` tell *this* route where to send the
+        // request; they are not generation parameters. Half the backends below
+        // have their body filtered by a key whitelist, but the rest — ooba,
+        // TabbyAPI, KoboldCpp, llama.cpp, Mancer, Aphrodite, HuggingFace — get
+        // the body forwarded verbatim, and so have been receiving both fields.
+        // Harmless for a lenient server, a rejected request for a strict one.
+        const forwarded = _.omit(request.body, ['api_type', 'api_server']);
+
         const args = {
             method: 'POST',
-            body: JSON.stringify(request.body),
+            body: JSON.stringify(forwarded),
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
             timeout: 0,
