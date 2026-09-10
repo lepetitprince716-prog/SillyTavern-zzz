@@ -79,6 +79,10 @@ module.exports = {
         '**/*.min.js',
         'public/scripts/extensions/quick-reply/lib/**',
         'public/scripts/extensions/tts/lib/**',
+        // The modern frontend is a separate package with its own flat ESLint
+        // config and its own `npm run lint`; its files are ESM and TypeScript,
+        // which this CommonJS-oriented config cannot parse.
+        'public-next/**',
     ],
     rules: {
         'jsdoc/no-undefined-types': ['warn', { disableReporting: true, markVariablesAsUsed: true }],
